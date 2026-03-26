@@ -35,9 +35,10 @@ import logging
 from flask import request, jsonify
 
 from pegaprox.api.plugins import register_plugin_route
-from pegaprox.api.helpers import get_connected_manager, check_cluster_access
+from pegaprox.api.helpers import get_connected_manager, check_cluster_access, safe_error
 from pegaprox.utils.auth import load_users
 from pegaprox.utils.rbac import has_permission
+from pegaprox.utils.audit import log_audit
 
 PLUGIN_ID = 'proxmox-ha'
 log = logging.getLogger(f'plugin.{PLUGIN_ID}')
@@ -81,6 +82,62 @@ def _px_url(manager, path):
     return f"https://{manager.host}:8006/api2/json{path}"
 
 
+def _require_string(body, field):
+    """
+    Extract a string field from a dict, rejecting non-strings (including None).
+    Returns (stripped_value, None) on success, (None, error_response_tuple) on failure.
+    """
+    value = body.get(field)
+    if value is None:
+        return None, (jsonify({'error': f"'{field}' is required"}), 400)
+    if not isinstance(value, str):
+        return None, (jsonify({'error': f"'{field}' must be a string"}), 400)
+    return value.strip(), None
+
+
+def _get_optional_string(body, field):
+    """
+    Extract an optional string field from a dict.
+    Returns (stripped_str, None) if present and valid, ('', None) if absent,
+    or (None, error_response_tuple) if present but not a string.
+    """
+    value = body.get(field)
+    if value is None:
+        return '', None
+    if not isinstance(value, str):
+        return None, (jsonify({'error': f"'{field}' must be a string"}), 400)
+    return value.strip(), None
+
+
+def _parse_optional_int(body, field):
+    """
+    Parse an optional integer field from a dict.
+    Returns (int_value_or_None, None) on success, (None, error_response_tuple) on bad input.
+    """
+    if field not in body:
+        return None, None
+    try:
+        val = int(body[field])
+        if val < 0:
+            return None, (jsonify({'error': f"'{field}' must be a non-negative integer"}), 400)
+        return val, None
+    except (TypeError, ValueError):
+        return None, (jsonify({'error': f"'{field}' must be an integer"}), 400)
+
+
+def _parse_proxmox_error(r):
+    """Safely extract an error detail from a Proxmox response."""
+    detail = None
+    try:
+        j = r.json()
+        detail = j.get('errors') or j.get('message')
+    except ValueError:
+        pass
+    if not detail:
+        detail = r.text or f'HTTP {r.status_code}'
+    return detail
+
+
 # ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
@@ -100,9 +157,13 @@ def ha_handler():
     # ---- RBAC --------------------------------------------------------------
     _users_db = load_users()
     _current_user = _users_db.get(request.session.get('user'), {})
+    _username = request.session.get('user', 'system')
 
-    _PERM_VIEW      = 'ha.view'
-    _PERM_RESOURCES = 'ha.resources'
+    # Permission constants — aligned with the built-in HA resources API:
+    #   GET  uses ha.view   (read-only, unchanged)
+    #   POST/PUT/DELETE use ha.config (matches built-in HA resource creation restriction)
+    _PERM_VIEW   = 'ha.view'
+    _PERM_WRITE  = 'ha.config'
 
     # ---- GET ---------------------------------------------------------------
     if method == 'GET':
@@ -132,57 +193,80 @@ def ha_handler():
                     return jsonify({'error': f'Proxmox returned {r.status_code}'}), 502
                 return jsonify({'data': r.json().get('data', [])})
         except Exception as e:
-            log.error(f"[{cluster_id}] HA GET error: {e}")
-            return jsonify({'error': str(e)}), 500
+            log.exception(f"[{cluster_id}] HA GET error")
+            return jsonify({'error': safe_error(e, 'HA GET failed')}), 500
 
     # ---- POST (add) --------------------------------------------------------
     if method == 'POST':
-        if not has_permission(_current_user, _PERM_RESOURCES):
-            return jsonify({'error': 'Permission denied', 'required': _PERM_RESOURCES}), 403
+        if not has_permission(_current_user, _PERM_WRITE):
+            return jsonify({'error': 'Permission denied', 'required': _PERM_WRITE}), 403
         body = request.get_json(silent=True) or {}
-        cluster_id = body.get('cluster_id', '').strip()
+
+        cluster_id, err = _require_string(body, 'cluster_id')
+        if err:
+            return err
         manager, err = _get_manager_or_error(cluster_id)
         if err:
             return err
 
-        sid = body.get('sid', '').strip()
+        sid, err = _require_string(body, 'sid')
+        if err:
+            return err
         validated_sid, err = _validate_sid(sid)
         if err:
             return err
 
         state = body.get('state', 'started')
-        if state not in ('started', 'stopped', 'enabled', 'disabled'):
+        if not isinstance(state, str) or state not in ('started', 'stopped', 'enabled', 'disabled'):
             return jsonify({'error': f"Invalid state '{state}'. Choose: started, stopped, enabled, disabled"}), 400
 
+        max_restart, err = _parse_optional_int(body, 'max_restart')
+        if err:
+            return err
+        max_relocate, err = _parse_optional_int(body, 'max_relocate')
+        if err:
+            return err
+
         payload = {'sid': validated_sid, 'state': state}
-        if 'max_restart' in body:
-            payload['max_restart'] = int(body['max_restart'])
-        if 'max_relocate' in body:
-            payload['max_relocate'] = int(body['max_relocate'])
+        if max_restart is not None:
+            payload['max_restart'] = max_restart
+        if max_relocate is not None:
+            payload['max_relocate'] = max_relocate
 
         try:
             r = manager._api_post(_px_url(manager, '/cluster/ha/resources'), json=payload)
             if r.status_code != 200:
-                detail = r.json().get('errors') or r.json().get('message') or r.text
+                detail = _parse_proxmox_error(r)
                 return jsonify({'error': f'Proxmox returned {r.status_code}', 'detail': detail}), 502
         except Exception as e:
-            log.error(f"[{cluster_id}] HA POST error: {e}")
-            return jsonify({'error': str(e)}), 500
+            log.exception(f"[{cluster_id}] HA POST error")
+            return jsonify({'error': safe_error(e, 'HA add failed')}), 500
 
         log.info(f"[{cluster_id}] Added HA resource: {validated_sid} (state={state})")
+        log_audit(
+            user=_username,
+            action='ha.resource_added',
+            details=f"Added HA resource {validated_sid} with state={state}",
+            cluster=cluster_id,
+        )
         return jsonify({'message': f'Added {validated_sid} to HA resources'})
 
     # ---- PUT (update) ------------------------------------------------------
     if method == 'PUT':
-        if not has_permission(_current_user, _PERM_RESOURCES):
-            return jsonify({'error': 'Permission denied', 'required': _PERM_RESOURCES}), 403
+        if not has_permission(_current_user, _PERM_WRITE):
+            return jsonify({'error': 'Permission denied', 'required': _PERM_WRITE}), 403
         body = request.get_json(silent=True) or {}
-        cluster_id = body.get('cluster_id', '').strip()
+
+        cluster_id, err = _require_string(body, 'cluster_id')
+        if err:
+            return err
         manager, err = _get_manager_or_error(cluster_id)
         if err:
             return err
 
-        sid = body.get('sid', '').strip()
+        sid, err = _require_string(body, 'sid')
+        if err:
+            return err
         validated_sid, err = _validate_sid(sid)
         if err:
             return err
@@ -190,13 +274,21 @@ def ha_handler():
         payload = {}
         if 'state' in body:
             state = body['state']
-            if state not in ('started', 'stopped', 'enabled', 'disabled'):
+            if not isinstance(state, str) or state not in ('started', 'stopped', 'enabled', 'disabled'):
                 return jsonify({'error': f"Invalid state '{state}'"}), 400
             payload['state'] = state
-        if 'max_restart' in body:
-            payload['max_restart'] = int(body['max_restart'])
-        if 'max_relocate' in body:
-            payload['max_relocate'] = int(body['max_relocate'])
+
+        max_restart, err = _parse_optional_int(body, 'max_restart')
+        if err:
+            return err
+        max_relocate, err = _parse_optional_int(body, 'max_relocate')
+        if err:
+            return err
+
+        if max_restart is not None:
+            payload['max_restart'] = max_restart
+        if max_relocate is not None:
+            payload['max_relocate'] = max_relocate
 
         if not payload:
             return jsonify({'error': 'No fields to update (provide state, max_restart, or max_relocate)'}), 400
@@ -204,19 +296,25 @@ def ha_handler():
         try:
             r = manager._api_put(_px_url(manager, f'/cluster/ha/resources/{validated_sid}'), json=payload)
             if r.status_code != 200:
-                detail = r.json().get('errors') or r.json().get('message') or r.text
+                detail = _parse_proxmox_error(r)
                 return jsonify({'error': f'Proxmox returned {r.status_code}', 'detail': detail}), 502
         except Exception as e:
-            log.error(f"[{cluster_id}] HA PUT error: {e}")
-            return jsonify({'error': str(e)}), 500
+            log.exception(f"[{cluster_id}] HA PUT error")
+            return jsonify({'error': safe_error(e, 'HA update failed')}), 500
 
         log.info(f"[{cluster_id}] Updated HA resource: {validated_sid} -> {payload}")
+        log_audit(
+            user=_username,
+            action='ha.resource_updated',
+            details=f"Updated HA resource {validated_sid}: {payload}",
+            cluster=cluster_id,
+        )
         return jsonify({'message': f'Updated HA resource {validated_sid}'})
 
     # ---- DELETE (remove) ---------------------------------------------------
     if method == 'DELETE':
-        if not has_permission(_current_user, _PERM_RESOURCES):
-            return jsonify({'error': 'Permission denied', 'required': _PERM_RESOURCES}), 403
+        if not has_permission(_current_user, _PERM_WRITE):
+            return jsonify({'error': 'Permission denied', 'required': _PERM_WRITE}), 403
         cluster_id = request.args.get('cluster_id', '').strip()
         manager, err = _get_manager_or_error(cluster_id)
         if err:
@@ -232,13 +330,19 @@ def ha_handler():
             if r.status_code == 404:
                 return jsonify({'error': f'HA resource {sid} not found'}), 404
             if r.status_code != 200:
-                detail = r.json().get('errors') or r.json().get('message') or r.text
+                detail = _parse_proxmox_error(r)
                 return jsonify({'error': f'Proxmox returned {r.status_code}', 'detail': detail}), 502
         except Exception as e:
-            log.error(f"[{cluster_id}] HA DELETE error: {e}")
-            return jsonify({'error': str(e)}), 500
+            log.exception(f"[{cluster_id}] HA DELETE error")
+            return jsonify({'error': safe_error(e, 'HA remove failed')}), 500
 
         log.info(f"[{cluster_id}] Removed HA resource: {validated_sid}")
+        log_audit(
+            user=_username,
+            action='ha.resource_removed',
+            details=f"Removed HA resource {validated_sid}",
+            cluster=cluster_id,
+        )
         return jsonify({'message': f'Removed {validated_sid} from HA resources'})
 
     return jsonify({'error': f'Method {method} not allowed'}), 405
