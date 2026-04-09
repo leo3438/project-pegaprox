@@ -3,6 +3,189 @@
         // Charts, Gauge, Toast, NodeJoin wizards
         // ═══════════════════════════════════════════════
 
+        // MK: Apr 2026 - PDF generator with professional template
+        // uses jsPDF + autoTable, loaded via CDN with local fallback
+        let _pdfLogoCache = null;
+
+        async function _loadPdfLogo() {
+            if (_pdfLogoCache) return _pdfLogoCache;
+            try {
+                const resp = await fetch('/images/pegaprox.png');
+                const blob = await resp.blob();
+                return new Promise((resolve) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => { _pdfLogoCache = reader.result; resolve(reader.result); };
+                    reader.readAsDataURL(blob);
+                });
+            } catch(e) { return null; }
+        }
+
+        // NS: main entry point for all PegaProx PDF exports
+        async function generatePegaProxPDF({ title, subtitle, clusterName, content, filename, orientation }) {
+            if (typeof window.jspdf === 'undefined') {
+                console.error('[PDF] jsPDF not loaded');
+                return;
+            }
+            const { jsPDF } = window.jspdf;
+            const doc = new jsPDF({ orientation: orientation || 'portrait', unit: 'mm', format: 'a4' });
+            const pageW = doc.internal.pageSize.getWidth();
+            const pageH = doc.internal.pageSize.getHeight();
+            const margin = 15;
+            const contentW = pageW - margin * 2;
+            const logoData = await _loadPdfLogo();
+            let y = margin;
+
+            // ── Header ──
+            const headerH = 28;
+            doc.setFillColor(26, 32, 39); // #1a2027
+            doc.rect(0, 0, pageW, headerH, 'F');
+            // orange accent bar
+            doc.setFillColor(229, 112, 0); // #E57000
+            doc.rect(0, headerH, pageW, 1.2, 'F');
+
+            if (logoData) {
+                try { doc.addImage(logoData, 'PNG', margin, 4, 20, 20); } catch(e) {}
+            }
+            doc.setFont('helvetica', 'bold');
+            doc.setFontSize(16);
+            doc.setTextColor(233, 236, 239); // #e9ecef
+            doc.text(title || 'PegaProx Report', margin + 24, 12);
+            doc.setFontSize(9);
+            doc.setFont('helvetica', 'normal');
+            doc.setTextColor(150, 160, 170);
+            const sub = [subtitle, clusterName, new Date().toLocaleString()].filter(Boolean).join('  |  ');
+            doc.text(sub, margin + 24, 18);
+            if (PEGAPROX_VERSION) {
+                doc.setFontSize(7);
+                doc.setTextColor(100, 110, 120);
+                doc.text(`v${PEGAPROX_VERSION}`, pageW - margin - 2, 24, { align: 'right' });
+            }
+
+            y = headerH + 6;
+
+            // ── Content Blocks ──
+            const addPageIfNeeded = (neededH) => {
+                if (y + neededH > pageH - 18) {
+                    doc.addPage();
+                    y = margin;
+                    return true;
+                }
+                return false;
+            };
+
+            for (const block of (content || [])) {
+                if (block.type === 'stats') {
+                    addPageIfNeeded(30);
+                    const stats = block.data || [];
+                    const boxW = Math.min(38, (contentW - (stats.length - 1) * 4) / stats.length);
+                    const totalW = stats.length * boxW + (stats.length - 1) * 4;
+                    let sx = margin + (contentW - totalW) / 2;
+                    stats.forEach(s => {
+                        // box bg
+                        doc.setFillColor(240, 242, 245);
+                        doc.roundedRect(sx, y, boxW, 22, 2, 2, 'F');
+                        // value
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(18);
+                        const rgb = _hexToRgb(s.color || '#333');
+                        doc.setTextColor(rgb.r, rgb.g, rgb.b);
+                        doc.text(String(s.value), sx + boxW / 2, y + 11, { align: 'center' });
+                        // label
+                        doc.setFont('helvetica', 'normal');
+                        doc.setFontSize(8);
+                        doc.setTextColor(100, 100, 100);
+                        doc.text(s.label, sx + boxW / 2, y + 18, { align: 'center' });
+                        sx += boxW + 4;
+                    });
+                    y += 28;
+                }
+
+                else if (block.type === 'table') {
+                    addPageIfNeeded(20);
+                    if (block.title) {
+                        doc.setFont('helvetica', 'bold');
+                        doc.setFontSize(11);
+                        doc.setTextColor(50, 50, 50);
+                        doc.text(block.title, margin, y + 4);
+                        y += 8;
+                    }
+                    doc.autoTable({
+                        startY: y,
+                        margin: { left: margin, right: margin },
+                        head: [block.columns],
+                        body: block.rows,
+                        theme: 'grid',
+                        styles: { fontSize: 8, cellPadding: 2.5, lineColor: [220,220,220], lineWidth: 0.2 },
+                        headStyles: { fillColor: [229, 112, 0], textColor: 255, fontStyle: 'bold', fontSize: 8.5 },
+                        alternateRowStyles: { fillColor: [248, 249, 250] },
+                        // severity color coding for CVE reports
+                        didParseCell: function(data) {
+                            if (data.section === 'body') {
+                                const val = String(data.cell.raw || '').toLowerCase();
+                                if (val === 'high' || val === 'critical') {
+                                    data.cell.styles.textColor = [220, 50, 50];
+                                    data.cell.styles.fontStyle = 'bold';
+                                } else if (val === 'medium') {
+                                    data.cell.styles.textColor = [200, 150, 0];
+                                } else if (val === 'low') {
+                                    data.cell.styles.textColor = [60, 130, 200];
+                                }
+                            }
+                        }
+                    });
+                    y = doc.lastAutoTable.finalY + 6;
+                }
+
+                else if (block.type === 'text') {
+                    addPageIfNeeded(10);
+                    doc.setFont('helvetica', 'normal');
+                    doc.setFontSize(9);
+                    doc.setTextColor(60, 60, 60);
+                    const lines = doc.splitTextToSize(block.value, contentW);
+                    doc.text(lines, margin, y + 4);
+                    y += lines.length * 4 + 4;
+                }
+
+                else if (block.type === 'image') {
+                    const imgW = Math.min(block.width || contentW, contentW);
+                    const ratio = (block.height || 100) / (block.width || contentW);
+                    const imgH = imgW * ratio;
+                    addPageIfNeeded(imgH + 4);
+                    try { doc.addImage(block.dataUrl, 'JPEG', margin, y, imgW, imgH); } catch(e) {}
+                    y += imgH + 4;
+                }
+
+                else if (block.type === 'spacer') {
+                    y += block.height || 8;
+                }
+            }
+
+            // ── Footers on all pages ──
+            const totalPages = doc.internal.getNumberOfPages();
+            for (let i = 1; i <= totalPages; i++) {
+                doc.setPage(i);
+                doc.setFillColor(245, 245, 245);
+                doc.rect(0, pageH - 10, pageW, 10, 'F');
+                doc.setDrawColor(220, 220, 220);
+                doc.line(0, pageH - 10, pageW, pageH - 10);
+                doc.setFont('helvetica', 'normal');
+                doc.setFontSize(7);
+                doc.setTextColor(140, 140, 140);
+                doc.text(`PegaProx ${PEGAPROX_VERSION ? 'v' + PEGAPROX_VERSION : ''}`, margin, pageH - 4);
+                doc.text('Confidential', pageW / 2, pageH - 4, { align: 'center' });
+                doc.text(`Page ${i} / ${totalPages}`, pageW - margin, pageH - 4, { align: 'right' });
+            }
+
+            doc.save(filename || 'pegaprox-report.pdf');
+        }
+
+        function _hexToRgb(hex) {
+            const r = parseInt(hex.slice(1,3), 16) || 0;
+            const g = parseInt(hex.slice(3,5), 16) || 0;
+            const b = parseInt(hex.slice(5,7), 16) || 0;
+            return {r, g, b};
+        }
+
         // Sparkline Component - Small inline chart
         // NS: ChatGPT wrote the initial SVG math, I just cleaned it up
         function Sparkline({ data = [], color = '#3b82f6', height = 24, width = 80 }) {
@@ -586,7 +769,7 @@
             // Sponsor URLs - edit these to add sponsor links
             const sponsorLinks = {
                 1: 'https://socialfurr.com',
-                2: null,
+                2: 'https://www.netwolk.ch',
                 3: null,
                 4: null,
                 5: null,

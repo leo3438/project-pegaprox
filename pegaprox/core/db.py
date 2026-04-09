@@ -1284,6 +1284,60 @@ class PegaProxDB:
                 logging.info("Added portal_only column to users table")
         except: pass
 
+        # MK: Apr 2026 - status page incident tracking + uptime history
+        try:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS status_incidents (
+                    id TEXT PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    status TEXT DEFAULT 'investigating',
+                    severity TEXT DEFAULT 'minor',
+                    message TEXT DEFAULT '',
+                    components TEXT DEFAULT '[]',
+                    started_at TEXT NOT NULL,
+                    resolved_at TEXT,
+                    created_by TEXT DEFAULT 'system',
+                    updated_at TEXT
+                )
+            ''')
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS status_uptime (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    cluster_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    nodes_online INTEGER DEFAULT 0,
+                    nodes_total INTEGER DEFAULT 0
+                )
+            ''')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_uptime_cluster ON status_uptime(cluster_id, timestamp DESC)')
+            logging.info("Ensured status_incidents + status_uptime tables exist")
+        except Exception as e:
+            logging.error(f"Error creating status tables: {e}")
+
+        # LW: Apr 2026 - user folders for organizing users in the management UI
+        try:
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS user_folders (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    color TEXT DEFAULT '#6b7280',
+                    sort_order INTEGER DEFAULT 0,
+                    created_at TEXT
+                )
+            ''')
+            logging.info("Ensured user_folders table exists")
+        except Exception as e:
+            logging.error(f"Error creating user_folders table: {e}")
+
+        # add user_folder column to users if missing
+        try:
+            cols = [r[1] for r in cursor.execute("PRAGMA table_info(users)").fetchall()]
+            if 'user_folder' not in cols:
+                cursor.execute("ALTER TABLE users ADD COLUMN user_folder TEXT DEFAULT ''")
+                logging.info("Added user_folder column to users table")
+        except: pass
+
         conn.commit()
         logging.info("DB schema initialized")
     
@@ -2467,6 +2521,7 @@ class PegaProxDB:
                 'last_oidc_sync': row_dict.get('last_oidc_sync', ''),
                 'layout_chosen': bool(row_dict.get('layout_chosen', 0)),
                 'portal_only': bool(row_dict.get('portal_only', 0)),
+                'user_folder': row_dict.get('user_folder', ''),
             }
 
         return users
@@ -2531,6 +2586,7 @@ class PegaProxDB:
             'last_oidc_sync': row_dict.get('last_oidc_sync', ''),
             'layout_chosen': bool(row_dict.get('layout_chosen', 0)),
             'portal_only': bool(row_dict.get('portal_only', 0)),
+            'user_folder': row_dict.get('user_folder', ''),
         }
 
     def save_user(self, username: str, data: dict):
@@ -2546,13 +2602,13 @@ class PegaProxDB:
             enabled, theme, language, ui_layout, taskbar_auto_expand,
              auth_source, display_name, email, avatar_mime, avatar_data, ldap_dn, last_ldap_sync,
              tenant_permissions, denied_permissions, oidc_sub, last_oidc_sync,
-             layout_chosen, portal_only)
+             layout_chosen, portal_only, user_folder)
             VALUES (?, ?, ?, ?, ?, ?,
                     COALESCE((SELECT created_at FROM users WHERE username = ?), ?),
                     ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
-                    ?, ?)
+                    ?, ?, ?)
         ''', (
             username,
             data.get('password_salt', ''),
@@ -2586,6 +2642,7 @@ class PegaProxDB:
             data.get('last_oidc_sync', ''),
             1 if data.get('layout_chosen', False) else 0,
             1 if data.get('portal_only', False) else 0,
+            data.get('user_folder', ''),
         ))
         self.conn.commit()
     

@@ -936,34 +936,19 @@
                 setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(a.href); }, 150);
             };
 
-            // MK: minimal PDF builder - zero deps
+            // MK: topology PDF export via shared template
             const buildMinimalPdf = (jpegDataUrl, cw, ch, filename) => {
-                const b64 = jpegDataUrl.split(',')[1];
-                const raw = atob(b64);
-                const imgLen = raw.length;
-                const sc = 0.36; // retina → ~72dpi
-                const pw = Math.round(cw * sc), ph = Math.round(ch * sc);
-                const enc = new TextEncoder();
-                const parts = []; const offsets = []; let pos = 0;
-                const addStr = (s) => { const b = enc.encode(s); parts.push(b); pos += b.length; };
-                const markObj = () => offsets.push(pos);
-
-                addStr('%PDF-1.4\n');
-                markObj(); addStr('1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n');
-                markObj(); addStr('2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n');
-                markObj(); addStr(`3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 ${pw} ${ph}]/Contents 5 0 R/Resources<</XObject<</Im0 4 0 R>>>>>>endobj\n`);
-                markObj(); addStr(`4 0 obj<</Type/XObject/Subtype/Image/Width ${cw}/Height ${ch}/ColorSpace/DeviceRGB/BitsPerComponent 8/Filter/DCTDecode/Length ${imgLen}>>stream\n`);
-                const imgBytes = new Uint8Array(imgLen);
-                for (let i = 0; i < imgLen; i++) imgBytes[i] = raw.charCodeAt(i);
-                parts.push(imgBytes); pos += imgLen;
-                addStr('\nendstream\nendobj\n');
-                const cs = `q ${pw} 0 0 ${ph} 0 0 cm /Im0 Do Q`;
-                markObj(); addStr(`5 0 obj<</Length ${cs.length}>>stream\n${cs}\nendstream\nendobj\n`);
-                const xrefPos = pos;
-                addStr(`xref\n0 ${offsets.length + 1}\n0000000000 65535 f \n`);
-                offsets.forEach(o => addStr(String(o).padStart(10, '0') + ' 00000 n \n'));
-                addStr(`trailer\n<</Size ${offsets.length + 1}/Root 1 0 R>>\nstartxref\n${xrefPos}\n%%EOF\n`);
-                downloadBlob(new Blob(parts, { type: 'application/pdf' }), filename);
+                // NS: Apr 2026 - use the standardized PDF template now
+                const aspect = ch / cw;
+                generatePegaProxPDF({
+                    title: 'Cluster Topology',
+                    clusterName: clusterName,
+                    filename: filename,
+                    orientation: cw > ch ? 'landscape' : 'portrait',
+                    content: [
+                        { type: 'image', dataUrl: jpegDataUrl, width: cw, height: ch }
+                    ]
+                });
             };
 
             const exportDiagram = async (format) => {
@@ -9858,27 +9843,26 @@
                                                                 </button>
                                                                 <button
                                                                     onClick={() => {
-                                                                        const el = document.getElementById('report-summary-content');
-                                                                        if (!el) return;
-                                                                        const printWin = window.open('', '_blank');
-                                                                        printWin.document.write(`<html><head><title>PegaProx Report - ${selectedCluster?.name || 'Cluster'}</title>
-                                                                            <style>body{background:#111a21;color:#e9ecef;font-family:system-ui,-apple-system,sans-serif;padding:30px;margin:0}
-                                                                            h2{color:#49afd9}table{width:100%;border-collapse:collapse}td,th{padding:6px 10px;text-align:left;border-bottom:1px solid #283844}
-                                                                            .gauge-val{font-size:28px;font-weight:bold}.stat-card{display:inline-block;text-align:center;padding:16px 24px;margin:8px;background:#1a2733;border-radius:8px}
-                                                                            @media print{body{background:white!important;color:#333!important}}</style></head><body>`);
-                                                                        printWin.document.write(`<h2>PegaProx Report — ${selectedCluster?.name || 'Cluster'}</h2>`);
-                                                                        printWin.document.write(`<p style="color:#728b9a">${new Date().toLocaleString()} | ${reportPeriod === 'hour' ? 'Last Hour' : reportPeriod === 'day' ? 'Last 24h' : 'Last Week'}</p><hr style="border-color:#283844">`);
-                                                                        printWin.document.write(`<div class="stat-card"><div class="gauge-val" style="color:#3b82f6">${reportData?.cpu?.current || 0}%</div><div>CPU</div></div>`);
-                                                                        printWin.document.write(`<div class="stat-card"><div class="gauge-val" style="color:#22c55e">${reportData?.memory?.current || 0}%</div><div>Memory</div></div>`);
-                                                                        printWin.document.write(`<div class="stat-card"><div class="gauge-val" style="color:#f97316">${reportData?.live?.vms_running || 0}</div><div>VMs</div></div>`);
-                                                                        printWin.document.write(`<div class="stat-card"><div class="gauge-val" style="color:#a855f7">${reportData?.live?.cts_running || 0}</div><div>Containers</div></div>`);
-                                                                        printWin.document.write(`<br><br><h3>Top CPU</h3><table>`);
-                                                                        topVms.slice(0,5).forEach((vm,i) => printWin.document.write(`<tr><td>${i+1}</td><td>${vm.name||vm.vmid}</td><td>${((vm.cpu||0)*100).toFixed(1)}%</td></tr>`));
-                                                                        printWin.document.write(`</table><h3>Top Memory</h3><table>`);
-                                                                        [...topVms].sort((a,b)=>(b.mem_percent||0)-(a.mem_percent||0)).slice(0,5).forEach((vm,i) => printWin.document.write(`<tr><td>${i+1}</td><td>${vm.name||vm.vmid}</td><td>${(vm.mem_percent||0).toFixed(1)}%</td></tr>`));
-                                                                        printWin.document.write(`</table></body></html>`);
-                                                                        printWin.document.close();
-                                                                        setTimeout(() => { printWin.print(); }, 500);
+                                                                        const period = reportPeriod === 'hour' ? 'Last Hour' : reportPeriod === 'day' ? 'Last 24h' : 'Last Week';
+                                                                        const topCpuRows = topVms.slice(0,10).map((vm,i) => [i+1, vm.name||vm.vmid, `${((vm.cpu||0)*100).toFixed(1)}%`]);
+                                                                        const topMemRows = [...topVms].sort((a,b)=>(b.mem_percent||0)-(a.mem_percent||0)).slice(0,10).map((vm,i) => [i+1, vm.name||vm.vmid, `${(vm.mem_percent||0).toFixed(1)}%`]);
+                                                                        generatePegaProxPDF({
+                                                                            title: 'Cluster Report',
+                                                                            subtitle: period,
+                                                                            clusterName: selectedCluster?.name,
+                                                                            filename: `pegaprox-report-${selectedCluster?.name || 'cluster'}.pdf`,
+                                                                            content: [
+                                                                                { type: 'stats', data: [
+                                                                                    { label: 'CPU', value: `${reportData?.cpu?.current || 0}%`, color: '#3b82f6' },
+                                                                                    { label: 'Memory', value: `${reportData?.memory?.current || 0}%`, color: '#22c55e' },
+                                                                                    { label: 'VMs', value: String(reportData?.live?.vms_running || 0), color: '#f97316' },
+                                                                                    { label: 'Containers', value: String(reportData?.live?.cts_running || 0), color: '#a855f7' },
+                                                                                ]},
+                                                                                { type: 'spacer', height: 4 },
+                                                                                { type: 'table', title: 'Top VMs by CPU', columns: ['#', 'VM', 'CPU'], rows: topCpuRows },
+                                                                                { type: 'table', title: 'Top VMs by Memory', columns: ['#', 'VM', 'Memory'], rows: topMemRows },
+                                                                            ]
+                                                                        });
                                                                     }}
                                                                     className="px-2.5 py-1 text-xs rounded border border-proxmox-border text-gray-400 hover:text-white hover:border-gray-500"
                                                                     title={t('exportPdf') || 'Export as PDF'}
@@ -10100,35 +10084,32 @@
                                                                         >PNG</button>
                                                                         <button
                                                                             onClick={() => {
-                                                                                const pw = window.open('', '_blank');
-                                                                                pw.document.write(`<html><head><title>CVE Report - ${selectedCluster?.name || 'Cluster'}</title>
-                                                                                    <style>body{background:#111a21;color:#e9ecef;font-family:system-ui,sans-serif;padding:30px;margin:0}
-                                                                                    h2{color:#49afd9}h3{color:#adbbc4;margin-top:20px}table{width:100%;border-collapse:collapse;margin-top:8px}
-                                                                                    td,th{padding:6px 10px;text-align:left;border-bottom:1px solid #283844;font-size:13px}
-                                                                                    th{color:#728b9a}.sev-high{color:#f54f47}.sev-medium{color:#efc006}.sev-low{color:#49afd9}
-                                                                                    .stat{display:inline-block;text-align:center;padding:12px 20px;margin:6px;background:#1a2733;border-radius:8px}
-                                                                                    .stat b{font-size:24px;display:block}
-                                                                                    @media print{body{background:white!important;color:#333!important}th{color:#666!important}}</style></head><body>`);
-                                                                                pw.document.write(`<h2>PegaProx CVE Report — ${selectedCluster?.name || 'Cluster'}</h2>`);
-                                                                                pw.document.write(`<p style="color:#728b9a">${new Date().toLocaleString()}</p><hr style="border-color:#283844">`);
                                                                                 const s = cveResults.summary || {};
-                                                                                pw.document.write(`<div class="stat"><b style="color:#f54f47">${s.total_cves || 0}</b>CVEs</div>`);
-                                                                                pw.document.write(`<div class="stat"><b style="color:#efc006">${s.total_updates || 0}</b>Updates</div>`);
-                                                                                pw.document.write(`<div class="stat"><b style="color:#60b515">${s.nodes_scanned || 0}</b>Nodes</div>`);
+                                                                                const blocks = [
+                                                                                    { type: 'stats', data: [
+                                                                                        { label: 'CVEs', value: String(s.total_cves || 0), color: '#dc3232' },
+                                                                                        { label: 'Updates', value: String(s.total_updates || 0), color: '#c89600' },
+                                                                                        { label: 'Nodes Scanned', value: String(s.nodes_scanned || 0), color: '#3c82c8' },
+                                                                                    ]},
+                                                                                    { type: 'spacer', height: 4 },
+                                                                                ];
                                                                                 (cveResults.nodes || []).forEach(node => {
-                                                                                    pw.document.write(`<h3>${node.node} — ${node.total_count || 0} updates, ${node.cve_count || 0} CVEs</h3>`);
                                                                                     if (node.cves && node.cves.length > 0) {
-                                                                                        pw.document.write('<table><tr><th>CVE</th><th>Package</th><th>Severity</th><th>Fix</th></tr>');
-                                                                                        node.cves.forEach(c => {
-                                                                                            const sc = c.severity === 'high' || c.severity === 'critical' ? 'sev-high' : c.severity === 'medium' ? 'sev-medium' : 'sev-low';
-                                                                                            pw.document.write(`<tr><td>${c.cve_id || '-'}</td><td>${c.package || '-'}</td><td class="${sc}">${c.severity || '-'}</td><td>${c.fix_type || '-'}</td></tr>`);
+                                                                                        blocks.push({
+                                                                                            type: 'table',
+                                                                                            title: `${node.node} — ${node.cve_count || 0} CVEs, ${node.total_count || 0} updates`,
+                                                                                            columns: ['CVE', 'Package', 'Severity', 'Fix'],
+                                                                                            rows: node.cves.map(c => [c.cve_id || '-', c.package || '-', c.severity || '-', c.fix_type || '-'])
                                                                                         });
-                                                                                        pw.document.write('</table>');
                                                                                     }
                                                                                 });
-                                                                                pw.document.write('</body></html>');
-                                                                                pw.document.close();
-                                                                                setTimeout(() => pw.print(), 500);
+                                                                                generatePegaProxPDF({
+                                                                                    title: 'CVE Security Report',
+                                                                                    subtitle: 'Vulnerability Scan',
+                                                                                    clusterName: selectedCluster?.name,
+                                                                                    filename: `pegaprox-cve-${selectedCluster?.name || 'cluster'}.pdf`,
+                                                                                    content: blocks
+                                                                                });
                                                                             }}
                                                                             className="px-2.5 py-1 text-xs rounded border border-proxmox-border text-gray-400 hover:text-white hover:border-gray-500"
                                                                             title={t('exportPdf') || 'Export as PDF'}
@@ -10692,6 +10673,94 @@
                                                                         <span className="text-orange-500">💾</span>
                                                                         <div className="text-xs text-orange-200">
                                                                             {t('localDiskBalanceWarning')}
+                                                                        </div>
+                                                                    </div>
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* NS: Apr 2026 - Predictive Load Balancing (DRS-like) */}
+                                                        <div className="pt-3 border-t border-gray-700/50">
+                                                            <Toggle
+                                                                checked={selectedCluster.predictive_balancing || false}
+                                                                onChange={v => updateConfig('predictive_balancing', v)}
+                                                                label={t('predictiveBalancing') || 'Predictive Load Balancing'}
+                                                            />
+                                                            <div className="text-xs text-gray-500 pl-12 mt-1">
+                                                                {t('predictiveBalancingDesc') || 'Migrates VMs before nodes become overloaded based on trend analysis (like VMware DRS).'}
+                                                            </div>
+                                                            {selectedCluster.predictive_balancing && (
+                                                                <div className="ml-12 mt-3 space-y-3">
+                                                                    <Slider
+                                                                        label={t('predictiveThreshold') || 'Predictive Threshold'}
+                                                                        description={t('predictiveThresholdDesc') || 'Score above which a node is considered trending towards overload'}
+                                                                        value={selectedCluster.predictive_threshold || 75}
+                                                                        onChange={v => updateConfig('predictive_threshold', v)}
+                                                                        min={50} max={95}
+                                                                    />
+                                                                </div>
+                                                            )}
+                                                        </div>
+
+                                                        {/* MK: Score weight tuning */}
+                                                        <div className="pt-3 border-t border-gray-700/50">
+                                                            <h4 className="text-sm font-medium text-gray-400 mb-3 flex items-center gap-2">
+                                                                <Icons.Settings className="w-4 h-4" />
+                                                                {t('scoreWeights') || 'Score Weights'}
+                                                            </h4>
+                                                            <div className="text-xs text-gray-500 mb-3">
+                                                                {t('scoreWeightsDesc') || 'Adjust how CPU, RAM, and Disk I/O contribute to the balancing score. Default: CPU=1.0, RAM=1.0, IO=0.'}
+                                                            </div>
+                                                            <div className="space-y-2">
+                                                                <Slider label="CPU Weight" value={selectedCluster.balance_cpu_weight ?? 1.0}
+                                                                    onChange={v => updateConfig('balance_cpu_weight', v)} min={0} max={2} step={0.1} unit="" />
+                                                                <Slider label="RAM Weight" value={selectedCluster.balance_mem_weight ?? 1.0}
+                                                                    onChange={v => updateConfig('balance_mem_weight', v)} min={0} max={2} step={0.1} unit="" />
+                                                                <Slider label="Disk I/O Weight" value={selectedCluster.balance_io_weight ?? 0.0}
+                                                                    onChange={v => updateConfig('balance_io_weight', v)} min={0} max={2} step={0.1} unit="" />
+                                                            </div>
+                                                        </div>
+
+                                                        {/* CPU Baseline / EVC Mode */}
+                                                        <div className="pt-3 border-t border-gray-700/50">
+                                                            <h4 className="text-sm font-medium text-gray-400 mb-2 flex items-center gap-2">
+                                                                <Icons.Cpu className="w-4 h-4" />
+                                                                {t('cpuBaseline') || 'CPU Baseline (EVC Mode)'}
+                                                            </h4>
+                                                            <div className="text-xs text-gray-500 mb-2">
+                                                                {t('cpuBaselineDesc') || 'Set a CPU compatibility baseline. VMs with a higher CPU type won\'t be auto-migrated. Similar to VMware EVC.'}
+                                                            </div>
+                                                            <select
+                                                                value={selectedCluster.cpu_baseline || 'none'}
+                                                                onChange={e => updateConfig('cpu_baseline', e.target.value === 'none' ? null : e.target.value)}
+                                                                className="w-full bg-proxmox-dark border border-proxmox-border rounded-lg px-3 py-2 text-sm text-white"
+                                                            >
+                                                                <option value="none">{t('cpuBaselineNone') || 'None (no restriction)'}</option>
+                                                                <optgroup label="Generic (Recommended)">
+                                                                    <option value="x86-64-v2">x86-64-v2</option>
+                                                                    <option value="x86-64-v2-AES">x86-64-v2-AES</option>
+                                                                    <option value="x86-64-v3">x86-64-v3</option>
+                                                                    <option value="x86-64-v4">x86-64-v4</option>
+                                                                </optgroup>
+                                                                <optgroup label="Intel">
+                                                                    <option value="Broadwell">Broadwell</option>
+                                                                    <option value="Skylake-Server">Skylake-Server</option>
+                                                                    <option value="Cascadelake-Server">Cascadelake-Server</option>
+                                                                    <option value="Icelake-Server">Icelake-Server</option>
+                                                                    <option value="SapphireRapids">SapphireRapids</option>
+                                                                </optgroup>
+                                                                <optgroup label="AMD">
+                                                                    <option value="EPYC">EPYC (Naples)</option>
+                                                                    <option value="EPYC-Rome">EPYC-Rome</option>
+                                                                    <option value="EPYC-Milan">EPYC-Milan</option>
+                                                                </optgroup>
+                                                            </select>
+                                                            {selectedCluster.cpu_baseline && selectedCluster.cpu_baseline !== 'none' && (
+                                                                <div className="mt-2 p-3 bg-blue-500/10 border border-blue-500/30 rounded-lg">
+                                                                    <div className="flex items-start gap-2">
+                                                                        <span className="text-blue-400">🔒</span>
+                                                                        <div className="text-xs text-blue-200">
+                                                                            {t('cpuBaselineActive') || `Baseline active: VMs with CPU type above "${selectedCluster.cpu_baseline}" will not be auto-migrated. VMs using "cpu: host" are checked for vendor compatibility.`}
                                                                         </div>
                                                                     </div>
                                                                 </div>

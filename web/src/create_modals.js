@@ -1691,6 +1691,9 @@
                 ssl_verification: false, migration_threshold: 20, migration_tolerance: 10, check_interval: 300,
                 auto_migrate: false, balance_containers: false, balance_local_disks: false,
                 dry_run: false, ssh_key: '',
+                predictive_balancing: false, predictive_threshold: 75,
+                balance_cpu_weight: 1.0, balance_mem_weight: 1.0, balance_io_weight: 0.0,
+                cpu_baseline: null,
             });
             const [showSshSettings, setShowSshSettings] = useState(false);
 

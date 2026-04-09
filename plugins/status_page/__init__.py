@@ -1,6 +1,6 @@
 """
 Public Status Page Plugin — Cluster health for monitoring screens
-NS: Apr 2026
+NS: Apr 2026, MK: Apr 2026 - incident tracking + uptime
 
 Public endpoint with URL auth key, no login required.
 Designed for IT monitoring dashboards (like PRTG status pages).
@@ -10,10 +10,13 @@ import json
 import hmac
 import logging
 import uuid
-from flask import request, jsonify, send_file
+import sqlite3
+from datetime import datetime, timedelta
+from flask import request, jsonify, send_file, Response
 
 from pegaprox.api.plugins import register_plugin_route
 from pegaprox.globals import cluster_managers
+from pegaprox.constants import CONFIG_DIR
 
 PLUGIN_NAME = "Public Status Page"
 PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -195,15 +198,219 @@ def _public_status():
 
         clusters.append(cluster_info)
 
-    return {'clusters': clusters, 'config': {
-        'page_title': cfg.get('page_title', 'System Status'),
-        'refresh_interval': cfg.get('refresh_interval', 30),
-        'show_node_details': cfg.get('show_node_details', True),
-        'show_vm_summary': cfg.get('show_vm_summary', True),
-        'show_storage': cfg.get('show_storage', True),
-        'theme_color': cfg.get('theme_color', '#e57000'),
-        'custom_logo_url': cfg.get('custom_logo_url', ''),
-    }}
+    # fetch recent incidents for the public page
+    incidents = _get_recent_incidents(14)
+
+    # record uptime snapshot
+    for c in clusters:
+        _record_uptime(c['id'], c.get('status', 'offline'), c.get('nodes', []))
+
+    # uptime percentages (30 day)
+    uptime_map = {}
+    for c in clusters:
+        uptime_map[c['id']] = _calc_uptime(c['id'], 30)
+
+    return {
+        'clusters': clusters,
+        'incidents': incidents,
+        'uptime': uptime_map,
+        'config': {
+            'page_title': cfg.get('page_title', 'System Status'),
+            'refresh_interval': cfg.get('refresh_interval', 30),
+            'show_node_details': cfg.get('show_node_details', True),
+            'show_vm_summary': cfg.get('show_vm_summary', True),
+            'show_storage': cfg.get('show_storage', True),
+            'theme_color': cfg.get('theme_color', '#e57000'),
+            'custom_logo_url': cfg.get('custom_logo_url', ''),
+            'maintenance_message': cfg.get('maintenance_message', ''),
+            'maintenance_start': cfg.get('maintenance_start', ''),
+            'maintenance_end': cfg.get('maintenance_end', ''),
+            'components': cfg.get('components', []),
+        },
+    }
+
+
+# ─── Incident CRUD (admin) ───
+
+def _get_db():
+    db_path = os.path.join(CONFIG_DIR, 'pegaprox.db')
+    conn = sqlite3.connect(db_path, timeout=5)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def _get_recent_incidents(days=14):
+    try:
+        conn = _get_db()
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            "SELECT * FROM status_incidents WHERE started_at >= ? ORDER BY started_at DESC LIMIT 50", (cutoff,)
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+    except:
+        return []
+
+def _record_uptime(cluster_id, status, nodes):
+    """Store a single uptime data point"""
+    try:
+        conn = _get_db()
+        online = sum(1 for n in nodes if n.get('online'))
+        total = len(nodes)
+        conn.execute(
+            "INSERT INTO status_uptime (cluster_id, timestamp, status, nodes_online, nodes_total) VALUES (?,?,?,?,?)",
+            (cluster_id, datetime.now().isoformat(), status, online, total)
+        )
+        # keep last 90 days only
+        cutoff = (datetime.now() - timedelta(days=90)).isoformat()
+        conn.execute("DELETE FROM status_uptime WHERE timestamp < ?", (cutoff,))
+        conn.commit()
+        conn.close()
+    except:
+        pass
+
+def _calc_uptime(cluster_id, days=30):
+    """Calculate uptime percentage over N days"""
+    try:
+        conn = _get_db()
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        rows = conn.execute(
+            "SELECT status FROM status_uptime WHERE cluster_id = ? AND timestamp >= ?",
+            (cluster_id, cutoff)
+        ).fetchall()
+        conn.close()
+        if not rows:
+            return None
+        up = sum(1 for r in rows if r['status'] == 'online')
+        return round(up / len(rows) * 100, 2)
+    except:
+        return None
+
+
+def _list_incidents():
+    err = _require_admin()
+    if err: return err
+    return _get_recent_incidents(90)
+
+
+def _create_incident():
+    err = _require_admin()
+    if err: return err
+    data = request.get_json() or {}
+    iid = uuid.uuid4().hex[:12]
+    now = datetime.now().isoformat()
+    try:
+        conn = _get_db()
+        conn.execute(
+            "INSERT INTO status_incidents (id, title, status, severity, message, components, started_at, created_by, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            (iid, data.get('title', 'Incident'), data.get('status', 'investigating'),
+             data.get('severity', 'minor'), data.get('message', ''),
+             json.dumps(data.get('components', [])), data.get('started_at', now),
+             request.session.get('user', 'admin'), now)
+        )
+        conn.commit()
+        conn.close()
+        return {'success': True, 'id': iid}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+
+def _update_incident():
+    err = _require_admin()
+    if err: return err
+    data = request.get_json() or {}
+    iid = data.get('id')
+    if not iid:
+        return {'error': 'id required'}, 400
+    now = datetime.now().isoformat()
+    sets, vals = [], []
+    for k in ['title', 'status', 'severity', 'message', 'components', 'resolved_at']:
+        if k in data:
+            val = json.dumps(data[k]) if k == 'components' else data[k]
+            sets.append(f"{k} = ?")
+            vals.append(val)
+    if data.get('status') == 'resolved' and 'resolved_at' not in data:
+        sets.append("resolved_at = ?")
+        vals.append(now)
+    sets.append("updated_at = ?")
+    vals.append(now)
+    vals.append(iid)
+    try:
+        conn = _get_db()
+        conn.execute(f"UPDATE status_incidents SET {', '.join(sets)} WHERE id = ?", vals)
+        conn.commit()
+        conn.close()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+
+def _delete_incident():
+    err = _require_admin()
+    if err: return err
+    data = request.get_json() or {}
+    iid = data.get('id')
+    if not iid:
+        return {'error': 'id required'}, 400
+    try:
+        conn = _get_db()
+        conn.execute("DELETE FROM status_incidents WHERE id = ?", (iid,))
+        conn.commit()
+        conn.close()
+        return {'success': True}
+    except Exception as e:
+        return {'error': str(e)}, 500
+
+
+def _uptime_history():
+    """Return 90-day uptime data for the uptime bar visualization"""
+    err = _check_key()
+    if err: return err
+    try:
+        conn = _get_db()
+        cutoff = (datetime.now() - timedelta(days=90)).isoformat()
+        rows = conn.execute(
+            "SELECT cluster_id, date(timestamp) as day, "
+            "ROUND(AVG(CASE WHEN status='online' THEN 1.0 ELSE 0.0 END)*100, 1) as uptime_pct "
+            "FROM status_uptime WHERE timestamp >= ? GROUP BY cluster_id, day ORDER BY day",
+            (cutoff,)
+        ).fetchall()
+        conn.close()
+        result = {}
+        for r in rows:
+            cid = r['cluster_id']
+            if cid not in result: result[cid] = []
+            result[cid].append({'day': r['day'], 'pct': r['uptime_pct']})
+        return result
+    except:
+        return {}
+
+
+# NS: SVG status badge — embeddable in README/docs
+def _status_badge():
+    err = _check_key()
+    if err: return err
+
+    all_online = all(mgr.is_connected for mgr in cluster_managers.values()) if cluster_managers else False
+    any_online = any(mgr.is_connected for mgr in cluster_managers.values()) if cluster_managers else False
+
+    if all_online:
+        label, color = 'operational', '#3fb950'
+    elif any_online:
+        label, color = 'partial outage', '#d29922'
+    else:
+        label, color = 'major outage', '#da3633'
+
+    text_w = len(label) * 6.5 + 12
+    total_w = 70 + text_w
+    svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{total_w}" height="20">
+  <rect width="70" height="20" rx="3" fill="#555"/>
+  <rect x="70" width="{text_w}" height="20" rx="3" fill="{color}"/>
+  <rect width="{total_w}" height="20" rx="3" fill="url(#g)"/>
+  <defs><linearGradient id="g" x2="0" y2="100%"><stop offset="0" stop-color="#bbb" stop-opacity=".1"/><stop offset="1" stop-opacity=".1"/></linearGradient></defs>
+  <text x="35" y="14" fill="#fff" text-anchor="middle" font-family="Verdana,sans-serif" font-size="11">status</text>
+  <text x="{70 + text_w/2}" y="14" fill="#fff" text-anchor="middle" font-family="Verdana,sans-serif" font-size="11">{label}</text>
+</svg>'''
+    return Response(svg, mimetype='image/svg+xml', headers={'Cache-Control': 'no-cache, max-age=0'})
 
 
 def register(app):
@@ -213,8 +420,15 @@ def register(app):
     register_plugin_route('status_page', 'config/update', _update_config)
     register_plugin_route('status_page', 'generate-key', _generate_key)
 
-    # Public data route — also registered through plugin proxy for the JSON API
-    # but the actual public access bypasses auth (see _public_status_endpoint in settings.py)
+    # Incident management (admin)
+    register_plugin_route('status_page', 'incidents', _list_incidents)
+    register_plugin_route('status_page', 'incidents/create', _create_incident)
+    register_plugin_route('status_page', 'incidents/update', _update_incident)
+    register_plugin_route('status_page', 'incidents/delete', _delete_incident)
+
+    # Public routes (key-auth only)
     register_plugin_route('status_page', 'public', _public_status)
+    register_plugin_route('status_page', 'uptime-history', _uptime_history)
+    register_plugin_route('status_page', 'badge', _status_badge)
 
     logging.info("[PLUGINS] Public Status Page plugin registered")

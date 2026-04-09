@@ -81,7 +81,12 @@ def oidc_authorize():
     from pegaprox.utils.audit import _is_trusted_proxy
     is_secure = request.is_secure or (_is_trusted_proxy(request.remote_addr) and request.headers.get('X-Forwarded-Proto') == 'https')
     # #188: store state + nonce + PKCE code_verifier in cookie
-    response.set_cookie('oidc_state', f"{state}:{nonce}:{code_verifier}", httponly=True, secure=is_secure, samesite='Lax', max_age=600)
+    # NS: Apr 2026 - append redirect_after for portal OIDC flow
+    redirect_after = request.args.get('redirect_after', '')
+    cookie_val = f"{state}:{nonce}:{code_verifier}"
+    if redirect_after and redirect_after.startswith('/'):
+        cookie_val += f":{redirect_after}"
+    response.set_cookie('oidc_state', cookie_val, httponly=True, secure=is_secure, samesite='Lax', max_age=600)
     return response
 
 
@@ -146,6 +151,8 @@ def oidc_callback():
         stored_nonce = cookie_parts[1]
     if len(cookie_parts) >= 3:
         stored_verifier = cookie_parts[2]
+    # NS: Apr 2026 - redirect_after for portal OIDC flow
+    stored_redirect_after = cookie_parts[3] if len(cookie_parts) >= 4 else ''
     if not stored_state or stored_state != state:
         logging.warning(f"[OIDC] State mismatch — stored={stored_state[:8] if stored_state else 'EMPTY'}..., received={state[:8] if state else 'EMPTY'}...")
         return jsonify({'error': 'Invalid state parameter (CSRF protection). Your browser may not be sending cookies — check reverse proxy configuration.'}), 400
@@ -221,14 +228,20 @@ def oidc_callback():
     
     log_audit(username, 'auth.oidc.login', f"OIDC login via {provider} from {client_ip}")
     
-    response = make_response(jsonify({
+    # NS: Apr 2026 - include portal_only so client portal can validate OIDC users
+    fresh_user = users.get(username, user)
+    resp_data = {
         'success': True,
         'user': username,
         'role': user.get('role', ROLE_VIEWER),
         'display_name': user.get('display_name', username),
         'auth_source': auth_source,
         'session_id': session_token,
-    }))
+        'portal_only': fresh_user.get('portal_only', False),
+    }
+    if stored_redirect_after:
+        resp_data['redirect_after'] = stored_redirect_after
+    response = make_response(jsonify(resp_data))
     
     # Set session cookie (same pattern as regular login)
     from pegaprox.utils.audit import _is_trusted_proxy

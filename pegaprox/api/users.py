@@ -330,6 +330,8 @@ def get_users():
             'tenant_id': user.get('tenant_id', DEFAULT_TENANT_ID),  # MK: Added for tenant display
             'auth_source': user.get('auth_source', 'local'),  # NS: For LDAP/Entra/OIDC badge in user list
             'permissions': user.get('permissions', []),  # LW: For permission display
+            'portal_only': user.get('portal_only', False),
+            'user_folder': user.get('user_folder', ''),
         })
     
     return jsonify(users_list)
@@ -721,11 +723,11 @@ def create_user():
         'tenant_id': tenant_id,
         'permissions': permissions,
         'denied_permissions': denied_permissions,
-        'portal_only': data.get('portal_only', False),
+        'portal_only': data.get('portal_only', False) if role != ROLE_ADMIN else False,
     }
-    
+
     save_users(users_db)
-    
+
     logging.info(f"Admin '{request.session['user']}' created user '{username}' with role '{role}'")
     log_audit(request.session['user'], 'user.created', f"Created user: {username} (role: {role}, tenant: {tenant_id})")
     
@@ -768,7 +770,10 @@ def update_user(username):
             if admin_count <= 1:
                 return jsonify({'error': 'Cannot remove admin role from last admin'}), 400
         user['role'] = data['role']
-        
+        # clear portal_only if promoted to admin
+        if data['role'] == ROLE_ADMIN and user.get('portal_only'):
+            user['portal_only'] = False
+
         # MK: Auto-set tenant_id when assigning a tenant-specific role
         # This ensures the user is properly associated with the tenant
         if data['role'] not in BUILTIN_ROLES:
@@ -802,7 +807,13 @@ def update_user(username):
     
     # NS: Apr 2026 — portal_only flag (user can only log in via /portal)
     if 'portal_only' in data:
+        # MK: admins must never be portal_only — they'd lock themselves out of the dashboard
+        if bool(data['portal_only']) and user.get('role') == ROLE_ADMIN:
+            return jsonify({'error': 'Admin users cannot be set to portal-only'}), 400
         user['portal_only'] = bool(data['portal_only'])
+
+    if 'user_folder' in data:
+        user['user_folder'] = str(data['user_folder'] or '')
 
     # NS: Added tenant_id update support
     if 'tenant_id' in data:
@@ -1720,3 +1731,79 @@ def rm_pool(cluster_id, pool_id):
     except:
         pass  # NS: not critical, orphaned perms don't hurt
     return jsonify({'success': True})
+
+
+# ─── User Folders ─── LW Apr 2026
+# simple grouping for the user management UI
+
+@bp.route('/api/user-folders', methods=['GET'])
+@require_auth(roles=[ROLE_ADMIN])
+def list_user_folders():
+    db = get_db()
+    try:
+        rows = db.conn.execute("SELECT * FROM user_folders ORDER BY sort_order, name").fetchall()
+        return jsonify([dict(r) for r in rows])
+    except:
+        return jsonify([])
+
+
+@bp.route('/api/user-folders', methods=['POST'])
+@require_auth(roles=[ROLE_ADMIN])
+def create_user_folder():
+    import uuid
+    data = request.get_json() or {}
+    name = data.get('name', '').strip()
+    if not name:
+        return jsonify({'error': 'Folder name required'}), 400
+    fid = uuid.uuid4().hex[:10]
+    db = get_db()
+    try:
+        db.conn.execute(
+            "INSERT INTO user_folders (id, name, color, sort_order, created_at) VALUES (?,?,?,?,?)",
+            (fid, name, data.get('color', '#6b7280'), data.get('sort_order', 0), datetime.now().isoformat())
+        )
+        db.conn.commit()
+        return jsonify({'success': True, 'id': fid})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/user-folders/<folder_id>', methods=['PUT'])
+@require_auth(roles=[ROLE_ADMIN])
+def update_user_folder(folder_id):
+    data = request.get_json() or {}
+    db = get_db()
+    sets, vals = [], []
+    for k in ['name', 'color', 'sort_order']:
+        if k in data:
+            sets.append(f"{k} = ?")
+            vals.append(data[k])
+    if not sets:
+        return jsonify({'error': 'No fields to update'}), 400
+    vals.append(folder_id)
+    try:
+        db.conn.execute(f"UPDATE user_folders SET {', '.join(sets)} WHERE id = ?", vals)
+        db.conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/user-folders/<folder_id>', methods=['DELETE'])
+@require_auth(roles=[ROLE_ADMIN])
+def delete_user_folder(folder_id):
+    db = get_db()
+    try:
+        users_db = load_users()
+        changed = False
+        for u in users_db.values():
+            if u.get('user_folder') == folder_id:
+                u['user_folder'] = ''
+                changed = True
+        if changed:
+            save_users(users_db)
+        db.conn.execute("DELETE FROM user_folders WHERE id = ?", (folder_id,))
+        db.conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500

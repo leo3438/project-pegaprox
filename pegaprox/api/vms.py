@@ -7059,10 +7059,11 @@ def cross_cluster_migrate_api():
     storage_map = data.get('target_storage_map')
     if storage_map and isinstance(storage_map, dict):
         target_storage = ','.join(f"{s}:{t}" for s, t in storage_map.items())
-    # per-NIC bridge mapping: {"vmbr0": "vmbr0", "vmbr1": "vmbr2"} → PVE format "vmbr0=vmbr0,vmbr1=vmbr2"
+    # per-NIC bridge mapping: {"vmbr0": "vmbr1", "vmbr1": "vmbr2"} → PVE format "vmbr0:vmbr1,vmbr1:vmbr2"
+    # NS: Apr 2026 - was using = instead of : (#274), PVE remote_migrate uses same format as target-storage
     bridge_map = data.get('target_bridge_map')
     if bridge_map and isinstance(bridge_map, dict):
-        target_bridge = ','.join(f"{s}={t}" for s, t in bridge_map.items())
+        target_bridge = ','.join(f"{s}:{t}" for s, t in bridge_map.items())
     else:
         target_bridge = data.get('target_bridge', 'vmbr0')
     target_vmid = data.get('target_vmid')

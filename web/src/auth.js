@@ -35,6 +35,11 @@
                     .then(r => r.json())
                     .then(data => {
                         if (data.success) {
+                            // NS: Apr 2026 - redirect to portal if OIDC flow was started from there
+                            if (data.redirect_after && data.redirect_after.startsWith('/')) {
+                                window.location.href = data.redirect_after;
+                                return;
+                            }
                             // Clear URL params and reload to authenticated state
                             window.history.replaceState({}, '', window.location.pathname);
                             window.location.reload();

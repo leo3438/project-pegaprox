@@ -175,6 +175,8 @@ class PegaProxManager:
         self.last_run = None
         self.last_migration_log = []
         self._vm_migration_cooldown = {}  # {vmid: timestamp} — prevent ping-pong
+        self._node_metrics_history = {}  # {node_name: [{timestamp, cpu, mem_pct, ...}]} ring buffer for predictive LB
+        self._metrics_history_lock = threading.Lock()  # guard concurrent access from API routes
 
         # maintenance mode
         self.nodes_in_maintenance = {}
@@ -902,8 +904,15 @@ class PegaProxManager:
                         netin = node_net.get('netin', 0)
                         netout = node_net.get('netout', 0)
                         
-                        # Calculate simple score (lower is better)
-                        score = cpu_percent + mem_percent
+                        # weighted scoring — configurable via balance_*_weight settings
+                        # NS: default weights keep backwards compat with old cpu+mem formula
+                        w_cpu = getattr(self.config, 'balance_cpu_weight', 1.0) or 0
+                        w_mem = getattr(self.config, 'balance_mem_weight', 1.0) or 0
+                        w_io = getattr(self.config, 'balance_io_weight', 0.0) or 0
+                        # fallback if someone sets all weights to 0
+                        if w_cpu == 0 and w_mem == 0 and w_io == 0:
+                            w_cpu, w_mem = 1.0, 1.0
+                        score = cpu_percent * w_cpu + mem_percent * w_mem + disk_percent * w_io
                         
                         # Check maintenance status
                         in_maintenance = node_name in self.nodes_in_maintenance
@@ -949,6 +958,19 @@ class PegaProxManager:
                             'offline': False
                         }
                         
+                        # feed predictive LB history (ring buffer, 288 entries = ~24h at 5min interval)
+                        if node.get('status') == 'online':
+                            with self._metrics_history_lock:
+                                hist = self._node_metrics_history.setdefault(node_name, [])
+                                hist.append({
+                                    'ts': time.time(),
+                                    'cpu': round(cpu_percent, 1),
+                                    'mem_pct': round(mem_percent, 1),
+                                    'disk_pct': round(disk_percent, 1),
+                                })
+                                if len(hist) > 288:
+                                    self._node_metrics_history[node_name] = hist[-288:]
+
                         maintenance_str = " [MAINTENANCE]" if in_maintenance else ""
                         update_str = " [UPDATING]" if is_updating else ""
                         self.logger.info(f"Node {node_name}: CPU {cpu_percent:.2f}%, RAM {mem_percent:.2f}% ({self._format_bytes(mem_used)}/{self._format_bytes(mem_total)}), Score {score:.2f}, Status: {node['status']}{maintenance_str}{update_str}")
@@ -1304,6 +1326,172 @@ class PegaProxManager:
 
         return {'violation': False}
 
+    # MK Apr 2026 - CPU compatibility matrix for EVC-like migration safety
+    # Proxmox doesn't have native EVC, so we do pre-flight checks ourselves
+    # Hierarchy: newer models can emulate older ones, not vice versa
+    # Levels verified against QEMU cpu.c + Proxmox CPUConfig.pm (Apr 2026)
+    _CPU_COMPAT_LEVELS = {
+        'qemu32': 0, 'qemu64': 1, 'kvm32': 0, 'kvm64': 1,
+        '486': 0, 'pentium': 0, 'pentium2': 1, 'pentium3': 2,
+        'athlon': 1, 'phenom': 3, 'coreduo': 3, 'core2duo': 4, 'n270': 3,
+        'Conroe': 5, 'Penryn': 6,
+        'Nehalem': 7, 'Nehalem-IBRS': 7,
+        'Westmere': 8, 'Westmere-IBRS': 8,
+        'SandyBridge': 9, 'SandyBridge-IBRS': 9,
+        'IvyBridge': 10, 'IvyBridge-IBRS': 10,
+        'Haswell': 11, 'Haswell-IBRS': 11, 'Haswell-noTSX': 11, 'Haswell-noTSX-IBRS': 11,
+        'Broadwell': 12, 'Broadwell-IBRS': 12, 'Broadwell-noTSX': 12, 'Broadwell-noTSX-IBRS': 12,
+        'Skylake-Client': 13, 'Skylake-Client-IBRS': 13, 'Skylake-Client-noTSX-IBRS': 13, 'Skylake-Client-v4': 13,
+        'Skylake-Server': 14, 'Skylake-Server-IBRS': 14, 'Skylake-Server-noTSX-IBRS': 14, 'Skylake-Server-v4': 14, 'Skylake-Server-v5': 14,
+        'Cascadelake-Server': 15, 'Cascadelake-Server-noTSX': 15, 'Cascadelake-Server-v2': 15, 'Cascadelake-Server-v4': 15, 'Cascadelake-Server-v5': 15,
+        'Cooperlake': 16, 'Cooperlake-v2': 16,
+        # NS: Proxmox maps Icelake-Client → Icelake-Server (never was a client CPU)
+        'Icelake-Client': 17, 'Icelake-Client-noTSX': 17,
+        'Icelake-Server': 17, 'Icelake-Server-noTSX': 17, 'Icelake-Server-v3': 17, 'Icelake-Server-v4': 17, 'Icelake-Server-v5': 17, 'Icelake-Server-v6': 17,
+        'SapphireRapids': 18, 'SapphireRapids-v2': 18,
+        'GraniteRapids': 19,
+        # AMD line
+        'Opteron_G1': 0, 'Opteron_G2': 1, 'Opteron_G3': 2, 'Opteron_G4': 3, 'Opteron_G5': 4,
+        'EPYC': 11, 'EPYC-IBPB': 11, 'EPYC-v3': 11, 'EPYC-v4': 11,
+        'EPYC-Rome': 13, 'EPYC-Rome-v2': 13, 'EPYC-Rome-v3': 13, 'EPYC-Rome-v4': 13,
+        'EPYC-Milan': 15, 'EPYC-Milan-v2': 15,
+        'EPYC-Genoa': 17, 'EPYC-Genoa-v2': 17,
+        # Proxmox custom types (vendor-neutral, based on qemu64 + flags)
+        # minimum HW: v2=Nehalem/Opteron_G3, v2-AES=Westmere/Opteron_G4, v3=Haswell/EPYC, v4=Skylake-Server/EPYC-Genoa
+        'x86-64-v2': 7, 'x86-64-v2-AES': 8, 'x86-64-v3': 11, 'x86-64-v4': 14,
+    }
+    # Intel and AMD are separate families, can't cross-migrate with cpu:host
+    _CPU_VENDOR_INTEL = {'GenuineIntel'}
+    _CPU_VENDOR_AMD = {'AuthenticAMD'}
+
+    def _check_cpu_compatibility(self, vm, target_node, node_status=None):
+        """Pre-migration CPU compatibility check (EVC-like)
+
+        Returns {compatible: True/False, reason: str, warning: str|None}
+        NS: Apr 2026 - not as good as VMware EVC but catches the obvious failures
+        """
+        vmid = vm.get('vmid')
+        source_node = vm.get('node')
+        vm_type = vm.get('type', 'qemu')
+
+        # LXC containers don't have CPU type issues
+        if vm_type == 'lxc':
+            return {'compatible': True, 'reason': 'container'}
+
+        # get VM config to check cpu type
+        try:
+            cfg_url = f"https://{self.host}:8006/api2/json/nodes/{source_node}/qemu/{vmid}/config"
+            r = self._create_session().get(cfg_url, timeout=8)
+            if r.status_code != 200:
+                return {'compatible': True, 'reason': 'config_unavailable'}
+            raw_cpu = r.json().get('data', {}).get('cpu', 'kvm64')
+            # MK: PVE cpu config is composite: "host,flags=+pcid;-spec-ctrl" or "cputype=x86-64-v3,hidden=1"
+            vm_cpu = raw_cpu.split(',')[0].replace('cputype=', '')
+        except Exception:
+            return {'compatible': True, 'reason': 'config_error'}
+
+        # cpu:host requires matching physical CPU vendor
+        if vm_cpu == 'host' or vm_cpu == 'max':
+            ns = node_status or self.get_node_status()
+            src_info = ns.get(source_node, {}).get('cpuinfo', {})
+            tgt_info = ns.get(target_node, {}).get('cpuinfo', {})
+            src_model = src_info.get('model', '')
+            tgt_model = tgt_info.get('model', '')
+
+            # if same model string, definitely compatible
+            if src_model and tgt_model and src_model == tgt_model:
+                return {'compatible': True, 'reason': 'same_cpu_model'}
+
+            # different model — check at least same vendor
+            src_vendor = src_info.get('vendor', '')
+            tgt_vendor = tgt_info.get('vendor', '')
+            if src_vendor and tgt_vendor and src_vendor != tgt_vendor:
+                return {
+                    'compatible': False,
+                    'reason': f"cpu:host - vendor mismatch ({src_vendor} vs {tgt_vendor})"
+                }
+
+            # same vendor but different model — risky, warn but allow
+            return {
+                'compatible': True,
+                'warning': f"cpu:host with different models ({src_model} → {tgt_model}) — migration may fail on CPU flag mismatch"
+            }
+
+        # check cpu_baseline enforcement
+        baseline = getattr(self.config, 'cpu_baseline', None)
+        if baseline and baseline != 'none':
+            bl_level = self._CPU_COMPAT_LEVELS.get(baseline, -1)
+            vm_level = self._CPU_COMPAT_LEVELS.get(vm_cpu, -1)
+            if bl_level >= 0 and vm_level >= 0 and vm_level > bl_level:
+                return {
+                    'compatible': False,
+                    'reason': f"VM cpu '{vm_cpu}' exceeds cluster baseline '{baseline}'"
+                }
+
+        # named cpu type — always compatible as long as QEMU supports it on target
+        # (Proxmox emulates named types on any hardware that's >= the type level)
+        return {'compatible': True, 'reason': 'named_cpu_type'}
+
+    def _get_cpu_compatibility_matrix(self):
+        """Build matrix showing which VMs can run on which nodes
+
+        MK: useful for the UI — admin sees at a glance what needs cpu type change
+        """
+        ns = self.get_node_status()
+        vms = self.get_vm_resources()
+        matrix = {'nodes': {}, 'vms': [], 'baseline': getattr(self.config, 'cpu_baseline', None)}
+
+        for node_name, data in ns.items():
+            if data.get('status') != 'online':
+                continue
+            cpuinfo = data.get('cpuinfo', {})
+            matrix['nodes'][node_name] = {
+                'model': cpuinfo.get('model', 'unknown'),
+                'vendor': cpuinfo.get('vendor', ''),
+                'cores': cpuinfo.get('cpus', 0),
+            }
+
+        # batch-fetch VM cpu types (one API call per VM, but skip compat re-fetch)
+        baseline = getattr(self.config, 'cpu_baseline', None)
+        bl_level = self._CPU_COMPAT_LEVELS.get(baseline, -1) if baseline and baseline != 'none' else -1
+
+        for vm in vms:
+            if vm.get('type') != 'qemu' or vm.get('status') != 'running':
+                continue
+            vmid = vm.get('vmid')
+            src = vm.get('node')
+            try:
+                cfg_url = f"https://{self.host}:8006/api2/json/nodes/{src}/qemu/{vmid}/config"
+                r = self._create_session().get(cfg_url, timeout=5)
+                raw_cpu = r.json().get('data', {}).get('cpu', 'kvm64') if r.status_code == 200 else 'unknown'
+                cpu_type = raw_cpu.split(',')[0].replace('cputype=', '')
+            except Exception:
+                cpu_type = 'unknown'
+
+            # compute compat inline using level table (no extra API calls)
+            compat = {}
+            vm_level = self._CPU_COMPAT_LEVELS.get(cpu_type, -1)
+            for tgt in matrix['nodes']:
+                if tgt == src:
+                    compat[tgt] = True
+                elif cpu_type in ('host', 'max'):
+                    # host cpu: compatible only if same vendor
+                    src_v = ns.get(src, {}).get('cpuinfo', {}).get('vendor', '')
+                    tgt_v = ns.get(tgt, {}).get('cpuinfo', {}).get('vendor', '')
+                    compat[tgt] = (src_v == tgt_v) if src_v and tgt_v else True
+                elif bl_level >= 0 and vm_level > bl_level:
+                    compat[tgt] = False
+                else:
+                    compat[tgt] = True
+
+            matrix['vms'].append({
+                'vmid': vmid, 'name': vm.get('name', ''),
+                'node': src, 'cpu_type': cpu_type,
+                'compatible_nodes': compat
+            })
+
+        return matrix
+
     def _enforce_affinity_rules(self, node_status):
         """Proactively fix anti-affinity violations by migrating offending VMs.
         NS: Mar 2026 - Issue #148 - anti-affinity rules weren't triggering migrations
@@ -1546,6 +1734,7 @@ class PegaProxManager:
 
         # NS: Feb 2026 - Check affinity rules before picking candidate (Issue #73)
         # MK: simulate the move first so the check sees the VM's new position
+        # NS: Apr 2026 - also check CPU compatibility (EVC-like) before selecting
         selected = None
         for candidate in all_candidates:
             cid = str(candidate.get('vmid'))
@@ -1559,14 +1748,21 @@ class PegaProxManager:
                     self.logger.warning(f"Skipping {candidate.get('name', 'unnamed')} (VMID {candidate.get('vmid')}) - enforced affinity rule '{aff['rule']}': {aff['message']}")
                     continue
                 else:
-                    # not enforced, just warn
                     self.logger.warning(f"Affinity warning for {candidate.get('name', 'unnamed')} (VMID {candidate.get('vmid')}) - rule '{aff['rule']}': {aff['message']} (allowing)")
+
+            # CPU compatibility check
+            cpu_compat = self._check_cpu_compatibility(candidate, target_node)
+            if not cpu_compat.get('compatible', True):
+                self.logger.warning(f"Skipping {candidate.get('name', 'unnamed')} (VMID {candidate.get('vmid')}) - CPU incompatible: {cpu_compat.get('reason')}")
+                continue
+            if cpu_compat.get('warning'):
+                self.logger.warning(f"[CPU] {candidate.get('name', 'unnamed')}: {cpu_compat['warning']}")
 
             selected = candidate
             break
 
         if not selected:
-            self.logger.info(f"No migratable VMs on {source_node} (all blocked by enforced affinity rules)")
+            self.logger.info(f"No migratable VMs on {source_node} (all blocked by affinity rules or CPU compatibility)")
             return None
 
         vm_type = 'CT' if selected.get('type') == 'lxc' else 'VM'
@@ -1677,15 +1873,18 @@ class PegaProxManager:
     def _compute_predictive_score(self, node_name, window=24):
         """Calculate predictive resource score for a node based on trend analysis"""
         try:
-            metrics = self._node_metrics_history.get(node_name, [])
+            with self._metrics_history_lock:
+                metrics = list(self._node_metrics_history.get(node_name, []))
             if len(metrics) < 3:
                 return {'score': 0, 'trend': 'stable', 'confidence': 0}
 
             # weighted avg - recent samples matter more (exponential decay)
-            weights = [0.7 ** (len(metrics) - i - 1) for i in range(len(metrics))]
+            # NS: Apr 2026 - weights must match windowed slice length, not full history
+            windowed = metrics[-window:]
+            cpu_vals = [m.get('cpu', 0) for m in windowed]
+            mem_vals = [m.get('mem_pct', 0) for m in windowed]
+            weights = [0.7 ** (len(windowed) - i - 1) for i in range(len(windowed))]
             w_sum = sum(weights)
-            cpu_vals = [m.get('cpu', 0) for m in metrics[-window:]]
-            mem_vals = [m.get('mem_pct', 0) for m in metrics[-window:]]
 
             cpu_trend = sum(c * w for c, w in zip(cpu_vals, weights)) / w_sum if w_sum else 0
             mem_trend = sum(m * w for m, w in zip(mem_vals, weights)) / w_sum if w_sum else 0
@@ -11512,6 +11711,36 @@ echo "AGENT_INSTALLED_OK"
             
             if migrations_done > 1:
                 self.logger.info(f"[SUMMARY] Completed {migrations_done} migration(s) in this cycle")
+
+            # NS: Apr 2026 - Predictive load balancing
+            # Even if cluster looks balanced RIGHT NOW, check if any node is trending towards overload
+            predictive_on = getattr(self.config, 'predictive_balancing', False)
+            if predictive_on and migrations_done == 0 and self.config.auto_migrate and not self.config.dry_run:
+                try:
+                    pred_threshold = getattr(self.config, 'predictive_threshold', 75)
+                    for nname, ndata in (node_status or {}).items():
+                        if ndata.get('status') != 'online' or ndata.get('maintenance_mode'):
+                            continue
+                        ps = self._compute_predictive_score(nname)
+                        if ps['trend'] == 'critical' and ps['confidence'] >= 0.6:
+                            self.logger.warning(f"[PREDICTIVE] Node {nname} trending critical (score={ps['score']}, confidence={ps['confidence']:.0%}) — triggering preemptive migration")
+                            # find least loaded node as target
+                            scores = [(n, d['score']) for n, d in node_status.items()
+                                      if d.get('status') == 'online' and not d.get('maintenance_mode') and n != nname
+                                      and n not in (getattr(self.config, 'excluded_nodes', []) or [])]
+                            if not scores:
+                                continue
+                            scores.sort(key=lambda x: x[1])
+                            tgt = scores[0][0]
+                            vm = self.find_migration_candidate(nname, tgt, exclude_vmids=already_migrated_vmids)
+                            if vm:
+                                self.logger.info(f"[PREDICTIVE] Migrating {vm.get('name', '')} (VMID {vm.get('vmid')}): {nname} → {tgt}")
+                                if self.migrate_vm(vm, tgt):
+                                    migrations_done += 1
+                                    self._vm_migration_cooldown[vm.get('vmid')] = time.time()
+                                    break  # one predictive migration per cycle max
+                except Exception as e:
+                    self.logger.error(f"[PREDICTIVE] Error: {e}")
 
             # NS: Mar 2026 - Proactive anti-affinity enforcement (Issue #148)
             # Even if cluster is balanced, fix any anti-affinity violations

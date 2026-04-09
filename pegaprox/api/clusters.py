@@ -113,6 +113,12 @@ def get_clusters():
                 'balance_containers': getattr(mgr.config, 'balance_containers', False),
                 'balance_local_disks': getattr(mgr.config, 'balance_local_disks', False),
                 'dry_run': mgr.config.dry_run,
+                'predictive_balancing': getattr(mgr.config, 'predictive_balancing', False),
+                'predictive_threshold': getattr(mgr.config, 'predictive_threshold', 75),
+                'balance_cpu_weight': getattr(mgr.config, 'balance_cpu_weight', 1.0),
+                'balance_mem_weight': getattr(mgr.config, 'balance_mem_weight', 1.0),
+                'balance_io_weight': getattr(mgr.config, 'balance_io_weight', 0.0),
+                'cpu_baseline': getattr(mgr.config, 'cpu_baseline', None),
                 'enabled': mgr.config.enabled,
                 'ha_enabled': mgr.config.ha_enabled,
                 'fallback_hosts': mgr.config.fallback_hosts,
@@ -578,6 +584,9 @@ ALLOWED_CONFIG_FIELDS = {
     'check_interval', 'auto_migrate', 'balance_containers', 'balance_local_disks',
     'dry_run', 'enabled', 'ha_enabled', 'fallback_hosts', 'ssh_user', 'ssh_port',
     'ha_settings', 'excluded_nodes',
+    'predictive_balancing', 'predictive_threshold',
+    'balance_cpu_weight', 'balance_mem_weight', 'balance_io_weight',
+    'cpu_baseline',
 }
 
 @bp.route('/api/clusters/<cluster_id>', methods=['PUT'])
@@ -624,6 +633,39 @@ def update_cluster_config_live(cluster_id):
     save_config()
 
     return jsonify({'message': 'Configuration updated successfully', 'updated_fields': updated})
+
+
+@bp.route('/api/clusters/<cluster_id>/cpu-compatibility', methods=['GET'])
+@require_auth(perms=['cluster.view'])
+def get_cpu_compatibility(cluster_id):
+    """CPU compatibility matrix for EVC-like migration safety"""
+    ok, err = check_cluster_access(cluster_id)
+    if not ok: return err
+    if cluster_id not in cluster_managers:
+        return jsonify({'error': 'Cluster not found'}), 404
+    mgr = cluster_managers[cluster_id]
+    try:
+        matrix = mgr._get_cpu_compatibility_matrix()
+        return jsonify(matrix)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@bp.route('/api/clusters/<cluster_id>/predictive-analysis', methods=['GET'])
+@require_auth(perms=['cluster.view'])
+def get_predictive_analysis(cluster_id):
+    """Get predictive load analysis for all nodes"""
+    ok, err = check_cluster_access(cluster_id)
+    if not ok: return err
+    if cluster_id not in cluster_managers:
+        return jsonify({'error': 'Cluster not found'}), 404
+    mgr = cluster_managers[cluster_id]
+    result = mgr.get_predictive_analysis()
+    return jsonify({
+        'nodes': result,
+        'enabled': getattr(mgr.config, 'predictive_balancing', False),
+        'threshold': getattr(mgr.config, 'predictive_threshold', 75),
+    })
 
 
 @bp.route('/api/clusters/<cluster_id>/excluded-nodes', methods=['GET'])

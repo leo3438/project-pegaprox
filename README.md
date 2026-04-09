@@ -30,6 +30,41 @@ PegaProx is a powerful web-based management interface for Proxmox VE and XCP-ng 
   <img src="https://pegaprox.com/pictures/pegaprox.png" alt="Dashboard Screenshot" width="800"/>
 </p>
 
+## ❤️ Sponsors
+
+### 💎 Platinum
+
+<p align="center">
+  <a href="https://www.netwolk.ch">
+    <img src="images/sponsors/sponsor2.png" alt="netwolk GmbH" width="200"/>
+  </a>
+</p>
+
+### 🥇 Gold
+
+<p align="center">
+  <a href="https://socialfurr.com">
+    <img src="images/sponsors/sponsor1.png" alt="SocialFurr" width="120"/>
+  </a>
+</p>
+
+### 🥈 Silver
+
+<p align="center">
+  <em>Your logo here</em> — <a href="mailto:sponsor@pegaprox.com">Become a Silver Sponsor</a>
+</p>
+
+### 🥉 Bronze
+
+<p align="center">
+  <em>Your logo here</em> — <a href="mailto:sponsor@pegaprox.com">Become a Bronze Sponsor</a>
+</p>
+
+<p align="center">
+  <a href="mailto:sponsor@pegaprox.com">Become a Sponsor</a> •
+  <a href="https://opencollective.com/pegaprox">Open Collective</a>
+</p>
+
 ## ✨ Features
 
 ### Multi-Cluster Management

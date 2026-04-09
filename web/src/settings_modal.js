@@ -14,6 +14,11 @@
             const [showAddUser, setShowAddUser] = useState(false);
             const [editingUser, setEditingUser] = useState(null);
             const [userFilter, setUserFilter] = useState('');
+            const [userFolders, setUserFolders] = useState([]);
+            const [showAddFolder, setShowAddFolder] = useState(false);
+            const [newFolderName, setNewFolderName] = useState('');
+            const [userPage, setUserPage] = useState(0);
+            const usersPerPage = 15;
             const [actionFilter, setActionFilter] = useState('');
             const [passwordResetUser, setPasswordResetUser] = useState(null);
             const [newPasswordValue, setNewPasswordValue] = useState('');
@@ -1370,6 +1375,11 @@
                 } catch (err) {
                     console.error('fetching users:', err);
                 }
+                // LW: also fetch user folders
+                try {
+                    const fr = await fetch(`${API_URL}/user-folders`, { credentials: 'include', headers: getAuthHeaders() });
+                    if (fr.ok) setUserFolders(await fr.json());
+                } catch(e) {}
             };
             
             const fetchAuditLogs = async () => {
@@ -1855,17 +1865,104 @@
                         <div className={`flex-1 overflow-auto ${isCorporate ? 'p-4' : 'p-6'}`}>
                             {activeTab === 'users' && (
                                 <div className="space-y-4">
-                                    {/* Add User Button */}
+                                    {/* Add User Button + Folder Management */}
                                     <div className="flex justify-between items-center">
                                         <h3 className="text-lg font-semibold text-white">{t('users')}</h3>
-                                        <button
-                                            onClick={() => setShowAddUser(true)}
-                                            className="flex items-center gap-2 px-4 py-2 bg-proxmox-orange hover:bg-orange-600 rounded-lg text-sm font-medium transition-colors"
-                                        >
-                                            <Icons.UserPlus />
-                                            {t('addUser')}
-                                        </button>
+                                        <div className="flex items-center gap-2">
+                                            <button
+                                                onClick={() => setShowAddFolder(!showAddFolder)}
+                                                className="flex items-center gap-1.5 px-3 py-2 bg-proxmox-card border border-proxmox-border hover:border-gray-500 rounded-lg text-sm text-gray-400 hover:text-white transition-colors"
+                                                title="Manage Folders"
+                                            >
+                                                <Icons.Folder className="w-4 h-4" />
+                                                {t('folders') || 'Folders'}
+                                            </button>
+                                            <button
+                                                onClick={() => setShowAddUser(true)}
+                                                className="flex items-center gap-2 px-4 py-2 bg-proxmox-orange hover:bg-orange-600 rounded-lg text-sm font-medium transition-colors"
+                                            >
+                                                <Icons.UserPlus />
+                                                {t('addUser')}
+                                            </button>
+                                        </div>
                                     </div>
+
+                                    {/* Folder Management Panel */}
+                                    {showAddFolder && (
+                                        <div className="bg-proxmox-card border border-proxmox-border rounded-lg p-4 space-y-3">
+                                            <h4 className="text-sm font-medium text-gray-300 flex items-center gap-2">
+                                                <Icons.Folder className="w-4 h-4" />
+                                                {t('userFolders') || 'User Folders'}
+                                            </h4>
+                                            <div className="flex gap-2">
+                                                <input
+                                                    value={newFolderName}
+                                                    onChange={e => setNewFolderName(e.target.value)}
+                                                    placeholder={t('folderName') || 'New folder name...'}
+                                                    className="flex-1 px-3 py-1.5 bg-proxmox-dark border border-proxmox-border rounded-lg text-sm text-white"
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter' && newFolderName.trim()) {
+                                                            fetch(`${API_URL}/user-folders`, { method: 'POST', credentials: 'include', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newFolderName.trim() }) })
+                                                                .then(r => r.json()).then(d => { if (d.success) { setNewFolderName(''); fetchUsers(); } });
+                                                        }
+                                                    }}
+                                                />
+                                                <button
+                                                    onClick={() => {
+                                                        if (!newFolderName.trim()) return;
+                                                        fetch(`${API_URL}/user-folders`, { method: 'POST', credentials: 'include', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' }, body: JSON.stringify({ name: newFolderName.trim() }) })
+                                                            .then(r => r.json()).then(d => { if (d.success) { setNewFolderName(''); fetchUsers(); } });
+                                                    }}
+                                                    className="px-3 py-1.5 bg-proxmox-orange hover:bg-orange-600 rounded-lg text-sm font-medium transition-colors"
+                                                >{t('add') || 'Add'}</button>
+                                            </div>
+                                            {userFolders.length > 0 && (
+                                                <div className="space-y-1">
+                                                    {userFolders.map(f => (
+                                                        <div key={f.id} className="flex items-center justify-between px-3 py-2 bg-proxmox-dark rounded-lg">
+                                                            <div className="flex items-center gap-2">
+                                                                <div className="w-3 h-3 rounded" style={{background: f.color || '#6b7280'}} />
+                                                                <span className="text-sm text-gray-300">{f.name}</span>
+                                                                <span className="text-xs text-gray-600">{users.filter(u => u.user_folder === f.id).length} users</span>
+                                                            </div>
+                                                            <button
+                                                                onClick={() => {
+                                                                    if (!confirm(`Delete folder "${f.name}"?`)) return;
+                                                                    fetch(`${API_URL}/user-folders/${f.id}`, { method: 'DELETE', credentials: 'include', headers: getAuthHeaders() })
+                                                                        .then(r => r.json()).then(d => { if (d.success) fetchUsers(); });
+                                                                }}
+                                                                className="text-red-400/60 hover:text-red-400 transition-colors"
+                                                            ><Icons.Trash2 className="w-3.5 h-3.5" /></button>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+
+                                    {/* Folder filter tabs */}
+                                    {userFolders.length > 0 && (
+                                        <div className="flex gap-1 flex-wrap">
+                                            <button
+                                                onClick={() => { setUserFilter(''); setUserPage(0); }}
+                                                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${!userFilter ? 'bg-proxmox-orange/20 text-proxmox-orange' : 'text-gray-500 hover:text-gray-300'}`}
+                                            >{t('all') || 'All'}</button>
+                                            <button
+                                                onClick={() => { setUserFilter('__none__'); setUserPage(0); }}
+                                                className={`px-2.5 py-1 rounded text-xs font-medium transition-colors ${userFilter === '__none__' ? 'bg-gray-500/20 text-gray-300' : 'text-gray-500 hover:text-gray-300'}`}
+                                            >{t('unfiled') || 'Unfiled'}</button>
+                                            {userFolders.map(f => (
+                                                <button
+                                                    key={f.id}
+                                                    onClick={() => { setUserFilter(f.id); setUserPage(0); }}
+                                                    className={`px-2.5 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1 ${userFilter === f.id ? 'bg-proxmox-orange/20 text-proxmox-orange' : 'text-gray-500 hover:text-gray-300'}`}
+                                                >
+                                                    <div className="w-2 h-2 rounded" style={{background: f.color || '#6b7280'}} />
+                                                    {f.name}
+                                                </button>
+                                            ))}
+                                        </div>
+                                    )}
                                     
                                     {/* Add User Form */}
                                     {showAddUser && (
@@ -1968,6 +2065,7 @@
                                                     </select>
                                                     <p className="text-xs text-gray-500 mt-1">{t('tenantAutoHint') || 'Auto-set when using tenant role'}</p>
                                                 </div>
+                                                {newUser.role !== 'admin' && (
                                                 <div className="flex items-center gap-3 pt-5">
                                                     <label className="flex items-center gap-3 cursor-pointer">
                                                         <input
@@ -1980,6 +2078,7 @@
                                                     </label>
                                                     <p className="text-xs text-gray-500">{t('portalOnlyHint') || 'User can only log in via /portal'}</p>
                                                 </div>
+                                                )}
                                                 <div className="flex items-end gap-2">
                                                     <button
                                                         type="submit"
@@ -2017,12 +2116,38 @@
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                {users.map(user => (
+                                                {(() => {
+                                                    const filtered = users.filter(u => {
+                                                        if (!userFilter) return true;
+                                                        if (userFilter === '__none__') return !u.user_folder;
+                                                        return u.user_folder === userFilter;
+                                                    });
+                                                    const totalPages = Math.ceil(filtered.length / usersPerPage);
+                                                    // LW: reset page if filter changes and page is out of bounds
+                                                    if (userPage >= totalPages && totalPages > 0 && userPage > 0) setUserPage(0);
+                                                    return filtered.slice(userPage * usersPerPage, (userPage + 1) * usersPerPage);
+                                                })().map(user => (
                                                     <tr key={user.username} className="border-b border-gray-700/50 hover:bg-proxmox-hover">
                                                         <td className="px-4 py-3">
                                                             <div className="flex items-center gap-2">
                                                                 <UserAvatar user={user} sizeClass="w-8 h-8" textClass="text-sm" />
-                                                                <span className="text-white font-medium">{user.username}</span>
+                                                                <div>
+                                                                    <span className="text-white font-medium">{user.username}</span>
+                                                                    {editingUser === user.username && userFolders.length > 0 ? (
+                                                                        <select
+                                                                            value={user.user_folder || ''}
+                                                                            onChange={e => handleUpdateUser(user.username, { user_folder: e.target.value })}
+                                                                            className="block mt-1 text-xs bg-proxmox-dark border border-proxmox-border rounded px-1.5 py-0.5 text-gray-400"
+                                                                        >
+                                                                            <option value="">— No folder —</option>
+                                                                            {userFolders.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
+                                                                        </select>
+                                                                    ) : user.user_folder && userFolders.find(f => f.id === user.user_folder) ? (
+                                                                        <span className="block text-xs mt-0.5" style={{color: userFolders.find(f => f.id === user.user_folder)?.color || '#6b7280'}}>
+                                                                            {userFolders.find(f => f.id === user.user_folder)?.name}
+                                                                        </span>
+                                                                    ) : null}
+                                                                </div>
                                                             </div>
                                                         </td>
                                                         <td className="px-4 py-3 text-gray-300">{user.display_name || '-'}</td>
@@ -2116,7 +2241,7 @@
                                                             </span>
                                                         </td>
                                                         <td className="px-4 py-3">
-                                                            {editingUser === user.username ? (
+                                                            {editingUser === user.username && user.role !== 'admin' ? (
                                                                 <button
                                                                     onClick={() => handleUpdateUser(user.username, { portal_only: !user.portal_only })}
                                                                     className={`px-2 py-1 rounded text-xs font-medium cursor-pointer transition-colors ${
@@ -2212,10 +2337,47 @@
                                                 ))}
                                             </tbody>
                                         </table>
+
+                                        {/* LW: pagination */}
+                                        {(() => {
+                                            const filtered = users.filter(u => {
+                                                if (!userFilter) return true;
+                                                if (userFilter === '__none__') return !u.user_folder;
+                                                return u.user_folder === userFilter;
+                                            });
+                                            const totalPages = Math.ceil(filtered.length / usersPerPage);
+                                            if (totalPages <= 1) return null;
+                                            return (
+                                                <div className="flex items-center justify-between px-4 py-3 border-t border-proxmox-border">
+                                                    <span className="text-xs text-gray-500">
+                                                        {t('showingUsers') || 'Showing'} {userPage * usersPerPage + 1}–{Math.min((userPage + 1) * usersPerPage, filtered.length)} {t('of') || 'of'} {filtered.length}
+                                                    </span>
+                                                    <div className="flex gap-1">
+                                                        <button
+                                                            onClick={() => setUserPage(Math.max(0, userPage - 1))}
+                                                            disabled={userPage === 0}
+                                                            className="px-2.5 py-1 rounded text-xs border border-proxmox-border text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                                                        >←</button>
+                                                        {Array.from({length: totalPages}, (_, i) => (
+                                                            <button
+                                                                key={i}
+                                                                onClick={() => setUserPage(i)}
+                                                                className={`px-2.5 py-1 rounded text-xs border ${i === userPage ? 'bg-proxmox-orange/20 border-proxmox-orange text-proxmox-orange' : 'border-proxmox-border text-gray-400 hover:text-white hover:border-gray-500'}`}
+                                                            >{i + 1}</button>
+                                                        ))}
+                                                        <button
+                                                            onClick={() => setUserPage(Math.min(totalPages - 1, userPage + 1))}
+                                                            disabled={userPage >= totalPages - 1}
+                                                            className="px-2.5 py-1 rounded text-xs border border-proxmox-border text-gray-400 hover:text-white hover:border-gray-500 disabled:opacity-30 disabled:cursor-not-allowed"
+                                                        >→</button>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })()}
                                     </div>
                                 </div>
                             )}
-                            
+
                             {/* Tenants Tab */}
                             {/* This whole section was added after Reddit feedback */}
                             {/* MSPs really wanted separate customer views */}

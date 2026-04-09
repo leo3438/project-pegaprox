@@ -196,6 +196,18 @@
                 'dompurify@3.2.4'
             );
         }).then(function() {
+            return loadScriptWithFallback(
+                'https://cdn.jsdelivr.net/npm/jspdf@2.5.2/dist/jspdf.umd.min.js',
+                '/static/js/jspdf.umd.min.js',
+                'jspdf@2.5.2'
+            );
+        }).then(function() {
+            return loadScriptWithFallback(
+                'https://cdn.jsdelivr.net/npm/jspdf-autotable@3.8.4/dist/jspdf.plugin.autotable.min.js',
+                '/static/js/jspdf.plugin.autotable.min.js',
+                'jspdf-autotable@3.8.4'
+            );
+        }).then(function() {
             // All libs loaded - transform babel scripts
             window.pegaproxLibsReady = true;
             if (window.Babel) {
