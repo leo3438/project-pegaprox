@@ -1362,8 +1362,8 @@ class PegaProxManager:
 
         return {'violation': False}
 
-    # MK Apr 2026 - CPU compatibility matrix for EVC-like migration safety
-    # Proxmox doesn't have native EVC, so we do pre-flight checks ourselves
+    # MK Apr 2026 - CPU compatibility matrix for migration safety
+    # Proxmox doesn't have native CPU compat mode, so we do pre-flight checks
     # Hierarchy: newer models can emulate older ones, not vice versa
     # Levels verified against QEMU cpu.c + Proxmox CPUConfig.pm (Apr 2026)
     _CPU_COMPAT_LEVELS = {
@@ -1401,10 +1401,10 @@ class PegaProxManager:
     _CPU_VENDOR_AMD = {'AuthenticAMD'}
 
     def _check_cpu_compatibility(self, vm, target_node, node_status=None):
-        """Pre-migration CPU compatibility check (EVC-like)
+        """Pre-migration CPU compatibility check (CPU compat)
 
         Returns {compatible: True/False, reason: str, warning: str|None}
-        NS: Apr 2026 - not as good as VMware EVC but catches the obvious failures
+        NS: Apr 2026 - catches the obvious CPU compat failures before migration
         """
         vmid = vm.get('vmid')
         source_node = vm.get('node')
@@ -1770,7 +1770,7 @@ class PegaProxManager:
 
         # NS: Feb 2026 - Check affinity rules before picking candidate (Issue #73)
         # MK: simulate the move first so the check sees the VM's new position
-        # NS: Apr 2026 - also check CPU compatibility (EVC-like) before selecting
+        # NS: Apr 2026 - also check CPU compatibility (CPU compat) before selecting
         selected = None
         for candidate in all_candidates:
             cid = str(candidate.get('vmid'))

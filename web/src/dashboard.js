@@ -10725,7 +10725,7 @@
                                                                 label={t('predictiveBalancing') || 'Predictive Load Balancing'}
                                                             />
                                                             <div className="text-xs text-gray-500 pl-12 mt-1">
-                                                                {t('predictiveBalancingDesc') || 'Migrates VMs before nodes become overloaded based on trend analysis (like VMware DRS).'}
+                                                                {t('predictiveBalancingDesc') || 'Migrates VMs before nodes become overloaded based on trend analysis (DRS-style).'}
                                                             </div>
                                                             {selectedCluster.predictive_balancing && (
                                                                 <div className="ml-12 mt-3 space-y-3">
@@ -10763,19 +10763,19 @@
                                                             </div>
                                                         </details>
 
-                                                        {/* CPU Baseline / EVC Mode — collapsible */}
+                                                        {/* CPU Baseline / CPU Compatibility Mode — collapsible */}
                                                         <details className="pt-3 border-t border-gray-700/50 group">
                                                             <summary className="flex items-center gap-2 cursor-pointer text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors list-none">
                                                                 <svg className="w-3.5 h-3.5 transition-transform group-open:rotate-90" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>
                                                                 <Icons.Cpu className="w-4 h-4" />
-                                                                {t('cpuBaseline') || 'CPU Baseline (EVC Mode)'}
+                                                                {t('cpuBaseline') || 'CPU Baseline (CPU Compatibility Mode)'}
                                                                 {selectedCluster.cpu_baseline && selectedCluster.cpu_baseline !== 'none' && (
                                                                     <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded font-normal">{selectedCluster.cpu_baseline}</span>
                                                                 )}
                                                             </summary>
                                                             <div className="mt-3 ml-6">
                                                                 <div className="text-xs text-gray-500 mb-2">
-                                                                    {t('cpuBaselineDesc') || 'Set a CPU compatibility baseline. VMs with a higher CPU type won\'t be auto-migrated. Similar to VMware EVC.'}
+                                                                    {t('cpuBaselineDesc') || 'Set a CPU compatibility baseline. VMs with a higher CPU type won\'t be auto-migrated. Ensures live migration compatibility.'}
                                                                 </div>
                                                                 <select
                                                                     value={selectedCluster.cpu_baseline || 'none'}

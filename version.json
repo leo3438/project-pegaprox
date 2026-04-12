@@ -3,7 +3,7 @@
     "build": "2026.04.12",
     "release_date": "2026-04-12",
     "changelog": [
-        "Predictive Load Balancing with CPU EVC compatibility mode (DRS-like)",
+        "Predictive Load Balancing with CPU compatibility mode (DRS-style)",
         "ESXi migration wizard — 3-step config with 28 options, disk/BIOS fixes (#222)",
         "ISO/Template Sync across cluster nodes for iSCSI-only setups",
         "Push Notifications plugin — Ntfy + Apprise support (#213)",
