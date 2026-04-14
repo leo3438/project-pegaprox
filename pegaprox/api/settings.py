@@ -3152,18 +3152,43 @@ def check_cluster_updates(cluster_id):
     total_updates = sum(max(r.get('count', 0), 0) for r in results.values())
     nodes_with_updates = sum(1 for r in results.values() if r.get('count', 0) > 0)
     nodes_failed = sum(1 for r in results.values() if not r.get('success', True))
-    
+
+    # MK: Apr 2026 - also check PBS servers (#240)
+    pbs_results = {}
+    try:
+        for pid, pmgr in pbs_managers.items():
+            if not pmgr.connected:
+                continue
+            try:
+                pbs_upd = pmgr.get_apt_updates()
+                upd_list = pbs_upd.get('data', []) if 'error' not in pbs_upd else []
+                pbs_results[pmgr.name or pid] = {
+                    'success': 'error' not in pbs_upd,
+                    'pbs_id': pid,
+                    'updates': upd_list,
+                    'count': len(upd_list)
+                }
+            except Exception as pe:
+                pbs_results[pmgr.name or pid] = {'success': False, 'pbs_id': pid, 'error': str(pe), 'updates': [], 'count': -1}
+    except Exception:
+        pass  # pbs_managers might not exist
+
+    pbs_total = sum(max(r.get('count', 0), 0) for r in pbs_results.values())
+
     # LW: store timestamp so we can show when last checked
     mgr._last_update_check = time.strftime('%Y-%m-%d %H:%M:%S')
-    
+
     return jsonify({
         'success': True,
         'nodes': results,
+        'pbs': pbs_results,
         'summary': {
-            'total_updates': total_updates,
+            'total_updates': total_updates + pbs_total,
             'nodes_with_updates': nodes_with_updates,
             'nodes_failed': nodes_failed,
             'total_nodes': len(results),
+            'pbs_with_updates': sum(1 for r in pbs_results.values() if r.get('count', 0) > 0),
+            'total_pbs': len(pbs_results),
             'checked_at': mgr._last_update_check
         }
     })

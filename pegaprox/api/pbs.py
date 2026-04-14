@@ -230,6 +230,35 @@ def get_pbs_status(pbs_id):
     })
 
 
+@bp.route('/api/pbs/<pbs_id>/apt/updates', methods=['GET'])
+@require_auth(perms=['pbs.view'])
+def get_pbs_apt_updates(pbs_id):
+    """List available APT updates on PBS server"""
+    if pbs_id not in pbs_managers:
+        return jsonify({'error': 'PBS server not found'}), 404
+    mgr = pbs_managers[pbs_id]
+    if not mgr.connected:
+        return jsonify({'error': 'Not connected'}), 503
+    result = mgr.get_apt_updates()
+    if 'error' in result:
+        return jsonify({'error': result['error']}), 500
+    return jsonify({'updates': result.get('data', []), 'count': len(result.get('data', []))})
+
+
+@bp.route('/api/pbs/<pbs_id>/apt/refresh', methods=['POST'])
+@require_auth(perms=['pbs.view'])
+def refresh_pbs_apt(pbs_id):
+    if pbs_id not in pbs_managers:
+        return jsonify({'error': 'PBS server not found'}), 404
+    mgr = pbs_managers[pbs_id]
+    if not mgr.connected:
+        return jsonify({'error': 'Not connected'}), 503
+    result = mgr.refresh_apt()
+    if 'error' in result:
+        return jsonify({'error': result['error']}), 500
+    return jsonify({'success': True, 'data': result.get('data')})
+
+
 @bp.route('/api/pbs/<pbs_id>/datastores', methods=['GET'])
 @require_auth(perms=['pbs.datastore.view'])
 def get_pbs_datastores(pbs_id):

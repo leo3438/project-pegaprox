@@ -244,6 +244,14 @@ class PBSManager:
         """Get PBS version info"""
         return self.api_get('/version')
     
+    def get_apt_updates(self) -> dict:
+        """List available APT updates on PBS host"""
+        return self.api_get('/nodes/localhost/apt/update')
+
+    def refresh_apt(self) -> dict:
+        """Refresh APT package cache on PBS"""
+        return self.api_post('/nodes/localhost/apt/update')
+
     def get_datastore_usage(self) -> dict:
         """Get all datastores usage overview - lightweight endpoint"""
         return self.api_get('/status/datastore-usage')

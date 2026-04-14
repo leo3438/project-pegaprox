@@ -2600,6 +2600,55 @@
                                 </div>
                             )}
 
+                            {/* PBS Server Updates - MK Apr 2026 (#240) */}
+                            {updateStatus?.pbs && Object.keys(updateStatus.pbs).length > 0 && (
+                                <div className="space-y-2 mt-4">
+                                    <h4 className="text-sm font-medium text-gray-400 flex items-center gap-2">
+                                        <Icons.Shield className="w-4 h-4" />
+                                        Proxmox Backup Server
+                                    </h4>
+                                    {Object.entries(updateStatus.pbs).map(([pbsName, pbsData]) => (
+                                        <div key={pbsName} className="bg-proxmox-dark rounded-lg border border-proxmox-border overflow-hidden">
+                                            <div className="p-3 flex items-center justify-between cursor-pointer hover:bg-proxmox-hover/30"
+                                                onClick={() => setSelectedNode(selectedNode === `pbs_${pbsName}` ? null : `pbs_${pbsName}`)}>
+                                                <div className="flex items-center gap-3">
+                                                    <Icons.Shield className="w-4 h-4 text-blue-400" />
+                                                    <span className="text-sm font-medium text-white">{pbsName}</span>
+                                                </div>
+                                                <div className="flex items-center gap-2">
+                                                    <span className={`text-xs px-2 py-0.5 rounded-full ${
+                                                        !pbsData.success ? 'bg-red-500/20 text-red-400' :
+                                                        pbsData.count > 0 ? 'bg-yellow-500/20 text-yellow-400' : 'bg-green-500/20 text-green-400'
+                                                    }`}>
+                                                        {!pbsData.success ? '⚠ Check failed' : `${pbsData.count || 0} updates`}
+                                                    </span>
+                                                    <Icons.ChevronDown className={`w-4 h-4 text-gray-400 transition-transform ${selectedNode === `pbs_${pbsName}` ? 'rotate-180' : ''}`} />
+                                                </div>
+                                            </div>
+                                            {selectedNode === `pbs_${pbsName}` && pbsData.count > 0 && (
+                                                <div className="border-t border-proxmox-border">
+                                                    <div className="max-h-48 overflow-y-auto">
+                                                        <table className="w-full text-xs">
+                                                            <thead><tr className="text-gray-500 border-b border-proxmox-border">
+                                                                <th className="text-left p-2">Package</th><th className="text-left p-2">Version</th>
+                                                            </tr></thead>
+                                                            <tbody>
+                                                                {(pbsData.updates || []).map((pkg, i) => (
+                                                                    <tr key={i} className="border-b border-proxmox-border/50">
+                                                                        <td className="p-2 text-white">{pkg.Package || pkg.package || '-'}</td>
+                                                                        <td className="p-2 text-gray-400">{pkg.Version || pkg.version || '-'}</td>
+                                                                    </tr>
+                                                                ))}
+                                                            </tbody>
+                                                        </table>
+                                                    </div>
+                                                </div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            )}
+
                             {/* Single Node Update Confirm Modal */}
                             {showNodeUpdateConfirm && (
                                 <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-backdrop" onClick={() => setShowNodeUpdateConfirm(null)}>
