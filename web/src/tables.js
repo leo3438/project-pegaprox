@@ -495,45 +495,83 @@
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4 mb-4">
-                        <Gauge value={metrics.cpu_percent} label="CPU" />
-                        <Gauge value={metrics.mem_percent} label="RAM" />
-                    </div>
+                    {/* ── metric panels: full-width area charts ─────────────────── */}
+                    {(() => {
+                        const cpuPct = Math.round(metrics.cpu_percent || 0);
+                        const ramPct = Math.round(metrics.mem_percent || 0);
+                        const cpuColor = cpuPct > 90 ? '#ef4444' : cpuPct > 70 ? '#f59e0b' : '#e85d04';
+                        const ramColor = ramPct > 90 ? '#ef4444' : ramPct > 75 ? '#f59e0b' : '#8b5cf6';
+                        return (
+                            <div className="node-metric-panels">
+                                <div className="node-metric-panel">
+                                    <div className="node-metric-panel-header">
+                                        <span className="node-metric-panel-label">
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>
+                                            CPU
+                                        </span>
+                                        <span className="node-metric-panel-pct" style={{color: cpuColor}}>{cpuPct}%</span>
+                                    </div>
+                                    <div className="node-metric-panel-chart">
+                                        <AreaSparkline data={history.cpu} color={cpuColor} height={36} />
+                                    </div>
+                                    <div className="node-metric-panel-bar">
+                                        <div className="node-metric-panel-bar-fill" style={{width:`${cpuPct}%`, background:`linear-gradient(90deg,${cpuColor}88,${cpuColor})`}} />
+                                    </div>
+                                </div>
+                                <div className="node-metric-panel">
+                                    <div className="node-metric-panel-header">
+                                        <span className="node-metric-panel-label">
+                                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M2 9h20v11a2 2 0 01-2 2H4a2 2 0 01-2-2V9z"/><path d="M2 9V7a2 2 0 012-2h16a2 2 0 012 2v2"/></svg>
+                                            RAM
+                                        </span>
+                                        <span className="node-metric-panel-pct" style={{color: ramColor}}>{ramPct}%</span>
+                                    </div>
+                                    <div className="node-metric-panel-chart">
+                                        <AreaSparkline data={history.mem} color={ramColor} height={36} />
+                                    </div>
+                                    <div className="node-metric-panel-bar">
+                                        <div className="node-metric-panel-bar-fill" style={{width:`${ramPct}%`, background:`linear-gradient(90deg,${ramColor}88,${ramColor})`}} />
+                                    </div>
+                                </div>
+                            </div>
+                        );
+                    })()}
 
-                    <div className="space-y-3 pt-3 border-t border-proxmox-border">
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs text-gray-500 flex items-center gap-2">
-                                <Icons.Cpu /> {t('cpuHistory')}
-                            </span>
-                            <Sparkline data={history.cpu} width={80} height={24} />
-                        </div>
-                        <div className="flex items-center justify-between">
-                            <span className="text-xs text-gray-500 flex items-center gap-2">
-                                <Icons.Memory /> {t('ramHistory')}
-                            </span>
-                            <Sparkline data={history.mem} width={80} height={24} />
-                        </div>
-                        <div className="flex items-center justify-between text-xs">
-                            <span className="text-gray-500">{t('ramUsage')}</span>
-                            <span className="text-gray-300 font-mono">
+                    {/* ── stats chips row ─────────────────────────────────────────── */}
+                    <div className="node-stats-row">
+                        {metrics.mem_used != null && metrics.mem_total != null && (
+                            <div className="node-stat-chip">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M4 6h16M4 10h16M4 14h16M4 18h7"/></svg>
                                 {formatBytes(metrics.mem_used)} / {formatBytes(metrics.mem_total)}
-                            </span>
-                        </div>
-                        {metrics.ksm && metrics.ksm.shared > 0 && (
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="text-gray-500">{t('ksmSharing') || 'KSM Sharing'}</span>
-                                <span className="text-purple-400 font-mono">{formatBytes(metrics.ksm.shared)}</span>
                             </div>
                         )}
-                        
-                        {/* Expandable Details */}
-                        <button 
-                            onClick={() => setExpanded(!expanded)}
-                            className="w-full flex items-center justify-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors pt-2"
-                        >
-                            {expanded ? t('showLess') : t('showMore')}
-                            <Icons.ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
-                        </button>
+                        {metrics.disk_percent != null && (
+                            <div className="node-stat-chip" style={metrics.disk_percent > 90 ? {color:'#ef4444',borderColor:'rgba(239,68,68,0.25)'} : metrics.disk_percent > 75 ? {color:'#f59e0b'} : {}}>
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 12H2M5.45 5.11L2 12v6a2 2 0 002 2h16a2 2 0 002-2v-6l-3.45-6.89A2 2 0 0016.76 4H7.24a2 2 0 00-1.79 1.11z"/></svg>
+                                Disk {(metrics.disk_percent || 0).toFixed(0)}%
+                            </div>
+                        )}
+                        {metrics.uptime > 0 && (
+                            <div className="node-stat-chip">
+                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+                                {formatUptime(metrics.uptime)}
+                            </div>
+                        )}
+                        {metrics.ksm && metrics.ksm.shared > 0 && (
+                            <div className="node-stat-chip" style={{color:'#a78bfa', borderColor:'rgba(167,139,250,0.25)'}}>
+                                KSM {formatBytes(metrics.ksm.shared)}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Expandable Details */}
+                    <button
+                        onClick={() => setExpanded(!expanded)}
+                        className="w-full flex items-center justify-center gap-1 text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
+                    >
+                        {expanded ? t('showLess') : t('showMore')}
+                        <Icons.ChevronDown className={`w-3 h-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+                    </button>
                         
                         {expanded && (
                             <div className="space-y-3 pt-2 border-t border-gray-700/50 animate-fade-in">
@@ -635,16 +673,6 @@
                             </div>
                         )}
                         
-                        {metrics.uptime > 0 && (
-                            <div className="flex items-center justify-between text-xs">
-                                <span className="text-gray-500 flex items-center gap-1">
-                                    <Icons.Clock /> {t('uptime')}
-                                </span>
-                                <span className="text-gray-300 font-mono">{formatUptime(metrics.uptime)}</span>
-                            </div>
-                        )}
-                    </div>
-
                     {/* Maintenance Confirmation Modal */}
                     {showMaintenanceConfirm && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60" onClick={() => setShowMaintenanceConfirm(false)}>

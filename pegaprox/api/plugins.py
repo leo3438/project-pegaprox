@@ -54,6 +54,13 @@ def plugin_proxy(plugin_id, subpath):
 
     routes = _plugin_routes.get(plugin_id, {})
     handler = routes.get(subpath)
+    # NS: prefix matching — allows plugins to register a catch-all like 'proxy'
+    # that handles 'proxy/api/search', 'proxy/api/dashboards/uid/abc', etc.
+    if not handler:
+        for route_path, route_fn in routes.items():
+            if subpath.startswith(route_path + '/'):
+                handler = route_fn
+                break
     if not handler:
         return jsonify({'error': f'Route not found: {subpath}'}), 404
 

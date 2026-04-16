@@ -2170,10 +2170,1206 @@
             );
         }
 
+        // ── Modern layout: KPI overview bar (5 cards) ────────────────────────
+        function ModernKPIBar({ clusterMetrics, clusterResources, nodeAlerts, knownNodes, clusterHistRef }) {
+            const cpuVals = Object.values(clusterMetrics).filter(m => m?.cpu_percent != null);
+            const avgCpu  = cpuVals.length ? cpuVals.reduce((s,m) => s+m.cpu_percent, 0) / cpuVals.length : null;
+            const ramVals = Object.values(clusterMetrics).filter(m => m?.mem_percent != null);
+            const avgRam  = ramVals.length ? ramVals.reduce((s,m) => s+m.mem_percent, 0) / ramVals.length : null;
+            const allVms  = (clusterResources || []).filter(r => r.type === 'qemu' || r.type === 'lxc');
+            const runningVms = allVms.filter(r => r.status === 'running').length;
+            const onlineNodes = cpuVals.length;
+            const offlineAlerts = Object.values(nodeAlerts || {}).filter(a => a.status === 'offline').length;
+            const offlineKnown  = Object.entries(knownNodes || {}).filter(([n, d]) => d.status === 'offline' && !clusterMetrics[n]).length;
+            const offlineNodes  = offlineAlerts + offlineKnown;
+            const totalNodes    = onlineNodes + offlineNodes;
+            const cpuColor = avgCpu > 85 ? '#ef4444' : avgCpu > 65 ? '#f59e0b' : '#22c55e';
+            const ramColor = avgRam > 90 ? '#ef4444' : avgRam > 70 ? '#f59e0b' : '#8b5cf6';
+            // Mini inline sparkline for KPI card
+            const MiniSparkline = ({ data, color }) => {
+                if (!data || data.length < 2) return null;
+                const W = 60, H = 20;
+                const max = Math.max(...data, 1);
+                const pts = data.map((v,i) => [
+                    (i/(data.length-1))*W,
+                    H - 1 - ((v/max)*(H-2))
+                ]);
+                const d = pts.map(([x,y],i)=>`${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+                return (
+                    <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block',opacity:0.7}}>
+                        <path d={d} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round"/>
+                    </svg>
+                );
+            };
+            const hist = clusterHistRef ? clusterHistRef.current : null;
+            const kpiCard = (icon, label, valueEl, barPct, barColor, sparkData) => (
+                <div className="modern-kpi-card">
+                    <div className="modern-kpi-icon" style={{color: barColor, background: `${barColor}1a`}}>{icon}</div>
+                    <div className="modern-kpi-body">
+                        <div className="modern-kpi-label">{label}</div>
+                        <div style={{display:'flex', alignItems:'center', justifyContent:'space-between', gap:4}}>
+                            <div className="modern-kpi-value">{valueEl}</div>
+                            {sparkData && <MiniSparkline data={sparkData} color={barColor} />}
+                        </div>
+                        {barPct != null && (
+                            <div className="modern-kpi-bar-track">
+                                <div className="modern-kpi-bar-fill" style={{width:`${Math.min(barPct,100)}%`, background: barColor}} />
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+            const muted = (n) => <span style={{fontSize:13, fontWeight:400, color:'rgba(255,255,255,0.3)'}}>{n}</span>;
+            const CpuIcon  = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M1 9h3M1 15h3M20 9h3M20 15h3"/></svg>;
+            const RamIcon  = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M6 19v-3M10 19v-3M14 19v-3M18 19v-3M2 9h20v11a2 2 0 01-2 2H4a2 2 0 01-2-2V9z"/><path d="M2 9V7a2 2 0 012-2h16a2 2 0 012 2v2"/></svg>;
+            const VmIcon   = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>;
+            const SrvIcon  = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><line x1="6" y1="6" x2="6.01" y2="6" strokeWidth="3" strokeLinecap="round"/><line x1="6" y1="18" x2="6.01" y2="18" strokeWidth="3" strokeLinecap="round"/></svg>;
+            const WarnIcon = <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17" strokeWidth="3" strokeLinecap="round"/></svg>;
+            return (
+                <div className="modern-kpi-bar">
+                    {kpiCard(CpuIcon, 'CPU moyen', <span style={{color:cpuColor}}>{avgCpu!=null?`${avgCpu.toFixed(1)}%`:'—'}</span>, avgCpu, cpuColor, hist?.cpu)}
+                    {kpiCard(RamIcon, 'RAM moyenne', <span style={{color:ramColor}}>{avgRam!=null?`${avgRam.toFixed(1)}%`:'—'}</span>, avgRam, ramColor, hist?.mem)}
+                    {kpiCard(VmIcon,  'VMs actives', <span style={{color:'#22c55e'}}>{runningVms} {muted(`/ ${allVms.length}`)}</span>, null, '#22c55e', null)}
+                    {kpiCard(SrvIcon, 'Nodes', <span style={{color: offlineNodes>0?'#f59e0b':'#38bdf8'}}>{onlineNodes} {muted(`/ ${totalNodes||onlineNodes}`)}</span>, null, '#38bdf8', null)}
+                    {offlineNodes > 0 && kpiCard(WarnIcon, 'Alertes', <span style={{color:'#ef4444'}}>{offlineNodes}</span>, null, '#ef4444', null)}
+                </div>
+            );
+        }
+
+        // ── Cluster-wide trend chart (right panel, modern layout) ────────────
+        function ClusterTrendPanel({ clusterHistRef, clusterMetrics, clusterResources }) {
+            // Force re-render when metrics update by using a derived value
+            const nodeCount = Object.keys(clusterMetrics).length;
+            const hist = clusterHistRef.current;
+            const cpuData = hist.cpu;
+            const memData = hist.mem;
+
+            // Current values
+            const cpuVals = Object.values(clusterMetrics).filter(m => m?.cpu_percent != null);
+            const memVals = Object.values(clusterMetrics).filter(m => m?.mem_percent != null);
+            const avgCpu = cpuVals.length ? cpuVals.reduce((s,m) => s+m.cpu_percent,0)/cpuVals.length : 0;
+            const avgMem = memVals.length ? memVals.reduce((s,m) => s+m.mem_percent,0)/memVals.length : 0;
+
+            // VM breakdown
+            const allVms = (clusterResources||[]).filter(r=>r.type==='qemu'||r.type==='lxc');
+            const running = allVms.filter(r=>r.status==='running').length;
+            const stopped = allVms.filter(r=>r.status==='stopped').length;
+            const paused  = allVms.filter(r=>r.status==='paused' ||r.status==='suspended').length;
+            const total   = allVms.length;
+
+            // Dual-metric chart — both CPU and RAM on the same SVG
+            const W = 280, H = 56;
+            const makePath = (data, color, opacity) => {
+                if (!data || data.length < 2) return null;
+                const max = Math.max(...data, 100); // keep scale 0-100%
+                const pts = data.map((v,i) => [
+                    (i/(data.length-1))*W,
+                    H - 2 - ((v/max)*(H-4))
+                ]);
+                const line = pts.map(([x,y],i)=>`${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+                const area = `${line} L${W},${H} L0,${H} Z`;
+                return { line, area, lastPt: pts[pts.length-1] };
+            };
+            const cpu = makePath(cpuData, '#e85d04', 0.35);
+            const mem = makePath(memData, '#8b5cf6', 0.25);
+
+            const cpuColor = avgCpu > 85 ? '#ef4444' : avgCpu > 65 ? '#f59e0b' : '#e85d04';
+            const memColor = avgMem > 90 ? '#ef4444' : avgMem > 70 ? '#f59e0b' : '#8b5cf6';
+
+            if (nodeCount === 0) return null;
+
+            return (
+                <div className="cluster-trend-panel">
+                    <div className="cluster-trend-header">
+                        <span className="cluster-trend-title">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+                            Tendance du cluster
+                        </span>
+                        <span className="cluster-trend-sub">{cpuData.length < 2 ? 'En attente de données…' : `${cpuData.length} points`}</span>
+                    </div>
+
+                    {/* Dual chart */}
+                    <div className="cluster-trend-chart">
+                        {cpuData.length >= 2 ? (
+                            <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block', borderRadius:6, overflow:'hidden'}}>
+                                <defs>
+                                    <linearGradient id="ctCpuGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={cpuColor} stopOpacity="0.35"/>
+                                        <stop offset="100%" stopColor={cpuColor} stopOpacity="0.02"/>
+                                    </linearGradient>
+                                    <linearGradient id="ctMemGrad" x1="0" y1="0" x2="0" y2="1">
+                                        <stop offset="0%" stopColor={memColor} stopOpacity="0.25"/>
+                                        <stop offset="100%" stopColor={memColor} stopOpacity="0.02"/>
+                                    </linearGradient>
+                                </defs>
+                                {/* 25%, 50%, 75% guide lines */}
+                                {[0.25,0.5,0.75].map(f => (
+                                    <line key={f} x1="0" y1={H*f} x2={W} y2={H*f} stroke="rgba(255,255,255,0.04)" strokeWidth="1"/>
+                                ))}
+                                {mem && <><path d={mem.area} fill="url(#ctMemGrad)"/><path d={mem.line} fill="none" stroke={memColor} strokeWidth="1.5" strokeLinejoin="round" opacity="0.7"/></>}
+                                {cpu && <><path d={cpu.area} fill="url(#ctCpuGrad)"/><path d={cpu.line} fill="none" stroke={cpuColor} strokeWidth="2" strokeLinejoin="round"/><circle cx={cpu.lastPt[0].toFixed(1)} cy={cpu.lastPt[1].toFixed(1)} r="3" fill={cpuColor}/></>}
+                            </svg>
+                        ) : (
+                            <div className="cluster-trend-empty">
+                                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                                Collecte des données en cours…
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Legend + current values */}
+                    <div className="cluster-trend-legend">
+                        <div className="cluster-trend-legend-item">
+                            <span className="cluster-trend-dot" style={{background: cpuColor}}/>
+                            <span>CPU</span>
+                            <span className="cluster-trend-val" style={{color: cpuColor}}>{avgCpu.toFixed(1)}%</span>
+                        </div>
+                        <div className="cluster-trend-legend-item">
+                            <span className="cluster-trend-dot" style={{background: memColor}}/>
+                            <span>RAM</span>
+                            <span className="cluster-trend-val" style={{color: memColor}}>{avgMem.toFixed(1)}%</span>
+                        </div>
+                    </div>
+
+                    {/* VM status breakdown */}
+                    {total > 0 && (
+                        <div className="cluster-trend-vms">
+                            <div className="cluster-trend-vm-bar">
+                                {running > 0 && <div style={{width:`${(running/total)*100}%`, background:'#22c55e', height:'100%', borderRadius:'2px 0 0 2px'}}/>}
+                                {paused  > 0 && <div style={{width:`${(paused/total)*100}%`,  background:'#f59e0b', height:'100%'}}/>}
+                                {stopped > 0 && <div style={{width:`${(stopped/total)*100}%`, background:'rgba(255,255,255,0.12)', height:'100%', borderRadius:'0 2px 2px 0'}}/>}
+                            </div>
+                            <div className="cluster-trend-vm-legend">
+                                {running>0 && <span style={{color:'#22c55e'}}><b>{running}</b> actives</span>}
+                                {paused >0 && <span style={{color:'#f59e0b'}}><b>{paused}</b> pausées</span>}
+                                {stopped>0 && <span style={{color:'rgba(255,255,255,0.4)'}}><b>{stopped}</b> arrêtées</span>}
+                                <span style={{color:'rgba(255,255,255,0.25)', marginLeft:'auto'}}>{total} total</span>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ── Focus layout: slim metrics bar shown at the top ──────────────────
+        // clusterMetrics here is allClusterMetrics: {clusterId: {data: {resources:{cpu:{percent},memory:{percent}}, guests:{vms:{running},containers:{running}}}}}
+        function FocusMetricsBar({ clusters, clusterMetrics, nodeAlerts }) {
+            const clusterDataList = Object.values(clusterMetrics).filter(c => c?.data?.resources);
+            const totalCpu = React.useMemo(() => {
+                const vals = clusterDataList.filter(c => c.data.resources?.cpu?.percent != null);
+                if (!vals.length) return null;
+                return (vals.reduce((s, c) => s + c.data.resources.cpu.percent, 0) / vals.length).toFixed(1);
+            }, [clusterMetrics]);
+            const totalRam = React.useMemo(() => {
+                const vals = clusterDataList.filter(c => c.data.resources?.memory?.percent != null);
+                if (!vals.length) return null;
+                return (vals.reduce((s, c) => s + c.data.resources.memory.percent, 0) / vals.length).toFixed(1);
+            }, [clusterMetrics]);
+            const totalVms = React.useMemo(() => {
+                return clusterDataList.reduce((s, c) => s + (c.data.guests?.vms?.running||0) + (c.data.guests?.containers?.running||0), 0);
+            }, [clusterMetrics]);
+            const alerts = Object.values(nodeAlerts || {}).filter(a => a.status === 'offline').length;
+
+            return (
+                <div className="focus-metrics-bar">
+                    <div className="focus-metric-item">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2" strokeWidth="2"/><path d="M8 21h8M12 17v4" strokeWidth="2"/></svg>
+                        <span>CPU</span>
+                        <span className="focus-metric-value" style={parseFloat(totalCpu) > 80 ? {color:'#f87171'} : parseFloat(totalCpu) > 60 ? {color:'#fbbf24'} : {}}>
+                            {totalCpu != null ? `${totalCpu}%` : '—'}
+                        </span>
+                    </div>
+                    <div className="focus-metric-item">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M4 6h16M4 10h16M4 14h16M4 18h7" strokeWidth="2" strokeLinecap="round"/></svg>
+                        <span>RAM</span>
+                        <span className="focus-metric-value" style={parseFloat(totalRam) > 85 ? {color:'#f87171'} : parseFloat(totalRam) > 70 ? {color:'#fbbf24'} : {}}>
+                            {totalRam != null ? `${totalRam}%` : '—'}
+                        </span>
+                    </div>
+                    <div className="focus-metric-item">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><rect x="2" y="2" width="20" height="20" rx="2" strokeWidth="2"/><path d="M8 12h8M12 8v8" strokeWidth="2"/></svg>
+                        <span>VMs</span>
+                        <span className="focus-metric-value">{totalVms}</span>
+                    </div>
+                    <div className="focus-metric-item">
+                        <svg className="w-3 h-3 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" strokeWidth="2"/><path d="M12 9v4M12 17h.01" strokeWidth="2" strokeLinecap="round"/></svg>
+                        <span>Alertes</span>
+                        <span className={`focus-metric-value ${alerts > 0 ? 'focus-metric-alert' : ''}`}>{alerts}</span>
+                    </div>
+                    <div className="focus-metric-item" style={{marginLeft:'auto', borderRight:'none'}}>
+                        <span style={{color:'rgba(255,255,255,0.2)', fontSize:'11px'}}>{clusters.length} cluster{clusters.length !== 1 ? 's' : ''}</span>
+                    </div>
+                </div>
+            );
+        }
+
+        // ── Analytics layout: horizontal cluster nav bar ──────────────────────
+        function AnalyticsTopNav({ clusters, selectedCluster, setSelectedCluster }) {
+            return (
+                <div className="analytics-topnav">
+                    <button
+                        className={`analytics-cluster-btn ${!selectedCluster ? 'active' : ''}`}
+                        onClick={() => setSelectedCluster(null)}
+                    >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6zM14 6a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2V6zM4 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2zM14 16a2 2 0 012-2h2a2 2 0 012 2v2a2 2 0 01-2 2h-2a2 2 0 01-2-2v-2z" /></svg>
+                        Vue globale
+                    </button>
+                    <div style={{width:'1px', height:'20px', background:'rgba(255,255,255,0.08)', margin:'0 4px'}} />
+                    {clusters.map(c => (
+                        <button
+                            key={c.id}
+                            className={`analytics-cluster-btn ${selectedCluster?.id === c.id ? 'active' : ''}`}
+                            onClick={() => setSelectedCluster(c)}
+                        >
+                            <span style={{width:6, height:6, borderRadius:'50%', background: c.connected !== false ? '#22c55e' : '#ef4444', flexShrink:0}} />
+                            {c.name}
+                        </button>
+                    ))}
+                </div>
+            );
+        }
+
+        // ── Analytics KPI bar with live metrics ───────────────────────────────
+        // allClusterMetrics structure: {clusterId: {data: {resources:{cpu:{percent},memory:{percent}}, guests:{vms:{running,stopped},containers:{running,stopped}}}}}
+        function AnalyticsKPIBar({ clusters, clusterMetrics, nodeAlerts }) {
+            // clusterMetrics here is actually allClusterMetrics from the parent
+            const clusterDataList = Object.values(clusterMetrics).filter(c => c?.data?.resources);
+            const cpu = React.useMemo(() => {
+                const vals = clusterDataList.filter(c => c.data.resources?.cpu?.percent != null);
+                return vals.length ? (vals.reduce((s,c) => s + c.data.resources.cpu.percent, 0) / vals.length).toFixed(1) : null;
+            }, [clusterMetrics]);
+            const ram = React.useMemo(() => {
+                const vals = clusterDataList.filter(c => c.data.resources?.memory?.percent != null);
+                return vals.length ? (vals.reduce((s,c) => s + c.data.resources.memory.percent, 0) / vals.length).toFixed(1) : null;
+            }, [clusterMetrics]);
+            const vms = clusterDataList.reduce((s,c) => s + (c.data.guests?.vms?.running||0) + (c.data.guests?.containers?.running||0), 0);
+            const alerts = Object.values(nodeAlerts||{}).filter(a => a.status==='offline').length;
+
+            const kpis = [
+                { label:'CPU Moyen', value: cpu != null ? `${cpu}%` : '—', sub:'Tous les clusters', color:'#22c55e', pct: parseFloat(cpu)||0 },
+                { label:'RAM Moyenne', value: ram != null ? `${ram}%` : '—', sub:'Tous les clusters', color:'#3b82f6', pct: parseFloat(ram)||0 },
+                { label:'VMs actives', value: String(vms), sub:`Sur ${clusters.length} cluster${clusters.length!==1?'s':''}`, color:'#e57000', pct: Math.min(vms*2, 100) },
+                { label:'Alertes', value: String(alerts), sub:'Nœuds hors ligne', color: alerts>0 ? '#ef4444' : '#22c55e', pct: Math.min(alerts*20,100) },
+            ];
+
+            return (
+                <div className="analytics-kpi-bar">
+                    {kpis.map((k,i) => (
+                        <div key={i} className="analytics-kpi-card">
+                            <div className="analytics-kpi-label">{k.label}</div>
+                            <div className="analytics-kpi-value" style={{color: k.color}}>{k.value}</div>
+                            <div className="analytics-kpi-sub">{k.sub}</div>
+                            <div className="analytics-kpi-bar-fill" style={{background:k.color, width:`${k.pct}%`, right:'unset'}} />
+                        </div>
+                    ))}
+                </div>
+            );
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // Zammad Plugin — Stats Widget (main page)
+        // ════════════════════════════════════════════════════════════════
+        function ZammadStatsWidget({ authFetch }) {
+            const API = `${API_URL}/plugins/zammad/api`;
+            const [stats, setStats] = useState(null);
+            const [loading, setLoading] = useState(true);
+
+            const fetchStats = React.useCallback(async () => {
+                try {
+                    const res = await authFetch(`${API}/stats`);
+                    if (res && res.ok) setStats(await res.json());
+                } catch (e) {}
+                finally { setLoading(false); }
+            }, []);
+
+            useEffect(() => {
+                fetchStats();
+                const id = setInterval(fetchStats, 60000);
+                return () => clearInterval(id);
+            }, [fetchStats]);
+
+            if (loading) return (
+                <div className="zammad-stats-widget">
+                    <div className="zammad-stats-loading">Chargement Zammad…</div>
+                </div>
+            );
+            if (!stats || !stats.configured) return null;
+
+            const avgFmt = stats.avg_response_fmt || '—';
+            return (
+                <div className="zammad-stats-widget">
+                    <div className="zammad-stats-header">
+                        <svg className="zammad-stats-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        <span className="zammad-stats-title">Support</span>
+                    </div>
+                    <div className="zammad-stats-kpis">
+                        <div className="zammad-stats-kpi">
+                            <span className="zammad-stats-kpi-val open">{stats.open}</span>
+                            <span className="zammad-stats-kpi-label">ouverts</span>
+                        </div>
+                        {stats.pending > 0 && (
+                            <div className="zammad-stats-kpi">
+                                <span className="zammad-stats-kpi-val pending">{stats.pending}</span>
+                                <span className="zammad-stats-kpi-label">en attente</span>
+                            </div>
+                        )}
+                        <div className="zammad-stats-kpi">
+                            <span className="zammad-stats-kpi-val time">{avgFmt}</span>
+                            <span className="zammad-stats-kpi-label">rép. moy.</span>
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // Zammad Plugin View (full page)
+        // ════════════════════════════════════════════════════════════════
+        function ZammadView({ authFetch, clusters }) {
+            const API = `${API_URL}/plugins/zammad/api`;
+            const [subTab, setSubTab] = useState('tickets');
+            const [cfg, setCfg] = useState(null);
+            const [tickets, setTickets] = useState([]);
+            const [ticketsLoading, setTicketsLoading] = useState(false);
+            const [ticketsTotal, setTicketsTotal] = useState(0);
+            const [page, setPage] = useState(1);
+            const [stateFilter, setStateFilter] = useState('open');
+            const [clusterFilter, setClusterFilter] = useState('');
+            const [searchQ, setSearchQ] = useState('');
+            const [links, setLinks] = useState({});
+            const [orgs, setOrgs] = useState([]);
+            const [orgSearch, setOrgSearch] = useState('');
+            const [orgLoading, setOrgLoading] = useState(false);
+            const [form, setForm] = useState({ zammad_url: '', api_token: '', verify_ssl: true });
+            const [testResult, setTestResult] = useState(null);
+            const [testLoading, setTestLoading] = useState(false);
+            const [saveMsg, setSaveMsg] = useState('');
+            const [saveLoading, setSaveLoading] = useState(false);
+            const [linkingCluster, setLinkingCluster] = useState(null);
+
+            const clusterList = React.useMemo(() => {
+                if (!clusters) return [];
+                if (Array.isArray(clusters)) return clusters.map(c => ({ id: c.id || c.name, name: c.name || c.id }));
+                return Object.entries(clusters).map(([id, c]) => ({ id, name: c.name || id }));
+            }, [clusters]);
+
+            // Load config
+            useEffect(() => {
+                authFetch(`${API}/config`).then(async r => {
+                    if (r && r.ok) {
+                        const d = await r.json();
+                        setCfg(d);
+                        setForm({ zammad_url: d.zammad_url || '', api_token: d.api_token || '', verify_ssl: d.verify_ssl !== false });
+                    }
+                }).catch(() => {});
+                authFetch(`${API}/links`).then(async r => {
+                    if (r && r.ok) setLinks((await r.json()).links || {});
+                }).catch(() => {});
+            }, []);
+
+            // Load tickets when filters change
+            useEffect(() => {
+                if (subTab !== 'tickets') return;
+                setTicketsLoading(true);
+                const params = new URLSearchParams({
+                    page, per_page: 25, state: stateFilter,
+                    ...(clusterFilter ? { cluster_id: clusterFilter } : {}),
+                    ...(searchQ ? { q: searchQ } : {}),
+                });
+                authFetch(`${API}/tickets?${params}`).then(async r => {
+                    if (r && r.ok) {
+                        const d = await r.json();
+                        setTickets(d.tickets || []);
+                        setTicketsTotal(d.total || 0);
+                    }
+                }).catch(() => {}).finally(() => setTicketsLoading(false));
+            }, [subTab, page, stateFilter, clusterFilter, searchQ]);
+
+            const handleSave = async () => {
+                setSaveLoading(true); setSaveMsg('');
+                try {
+                    const r = await authFetch(`${API}/config/save`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(form) });
+                    if (r && r.ok) { setSaveMsg('✓ Sauvegardé'); setTimeout(() => setSaveMsg(''), 3000); }
+                } catch (e) { setSaveMsg('Erreur'); }
+                finally { setSaveLoading(false); }
+            };
+
+            const handleTest = async () => {
+                setTestLoading(true); setTestResult(null);
+                try {
+                    const r = await authFetch(`${API}/test`);
+                    if (r && r.ok) setTestResult(await r.json());
+                } catch (e) { setTestResult({ success: false, error: String(e) }); }
+                finally { setTestLoading(false); }
+            };
+
+            const handleSearchOrgs = async (q) => {
+                setOrgSearch(q);
+                if (q.length < 2) { setOrgs([]); return; }
+                setOrgLoading(true);
+                try {
+                    const r = await authFetch(`${API}/organizations?q=${encodeURIComponent(q)}`);
+                    if (r && r.ok) setOrgs((await r.json()).organizations || []);
+                } catch (e) {}
+                finally { setOrgLoading(false); }
+            };
+
+            const handleLink = async (clusterId, clusterName, orgId, orgName) => {
+                const r = await authFetch(`${API}/link`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cluster_id: clusterId, cluster_name: clusterName, org_id: orgId, org_name: orgName }),
+                });
+                if (r && r.ok) {
+                    const d = await r.json();
+                    setLinks(d.links || {});
+                    setLinkingCluster(null);
+                    setOrgs([]);
+                    setOrgSearch('');
+                }
+            };
+
+            const handleUnlink = async (clusterId) => {
+                const r = await authFetch(`${API}/link`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ cluster_id: clusterId, org_id: null }),
+                });
+                if (r && r.ok) { const d = await r.json(); setLinks(d.links || {}); }
+            };
+
+            const stateColor = (s) => {
+                const sl = (s || '').toLowerCase();
+                if (sl.includes('open') || sl.includes('new')) return 'open';
+                if (sl.includes('pending')) return 'pending';
+                if (sl.includes('closed')) return 'closed';
+                return 'other';
+            };
+
+            const priorityColor = (p) => {
+                const pl = (p || '').toLowerCase();
+                if (pl.includes('high') || pl === '3') return 'high';
+                if (pl.includes('low') || pl === '1') return 'low';
+                return 'normal';
+            };
+
+            const fmtDate = (s) => {
+                if (!s) return '—';
+                try {
+                    return new Date(s).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit', hour: '2-digit', minute: '2-digit' });
+                } catch { return s; }
+            };
+
+            const isConfigured = cfg && cfg.configured;
+
+            return (
+                <div className="zammad-view">
+                    {/* Header */}
+                    <div className="zammad-header">
+                        <div className="zammad-header-left">
+                            <svg className="zammad-logo" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <rect width="32" height="32" rx="6" fill="#0080ff"/>
+                                <path d="M8 22l8-12h-7v-2h10v2L11 22h9v2H8v-2z" fill="white"/>
+                            </svg>
+                            <div>
+                                <div className="zammad-title">Zammad</div>
+                                {cfg?.zammad_url && <div className="zammad-url">{cfg.zammad_url}</div>}
+                            </div>
+                        </div>
+                        <div className="zammad-status-badge" style={{background: isConfigured ? 'rgba(34,197,94,0.15)' : 'rgba(239,68,68,0.15)', color: isConfigured ? '#22c55e' : '#ef4444'}}>
+                            <span style={{width:6,height:6,borderRadius:'50%',background:'currentColor',display:'inline-block',marginRight:5}}/>
+                            {isConfigured ? 'Connecté' : 'Non configuré'}
+                        </div>
+                    </div>
+
+                    {/* Sub-tabs */}
+                    <div className="zammad-subtabs">
+                        {[
+                            { id: 'tickets', label: '🎫 Tickets' },
+                            { id: 'clusters', label: '🔗 Clusters liés' },
+                            { id: 'config', label: '⚙ Configuration' },
+                        ].map(t => (
+                            <button key={t.id} onClick={() => setSubTab(t.id)}
+                                className={`zammad-subtab ${subTab === t.id ? 'active' : ''}`}>{t.label}</button>
+                        ))}
+                    </div>
+
+                    {/* ── Tickets tab ── */}
+                    {subTab === 'tickets' && (
+                        <div className="zammad-tickets-pane">
+                            {!isConfigured ? (
+                                <div className="zammad-empty">
+                                    <div style={{fontSize:40,marginBottom:12}}>🎫</div>
+                                    <div>Configurez Zammad dans l'onglet Configuration pour voir les tickets.</div>
+                                </div>
+                            ) : (
+                                <>
+                                    {/* Filter bar */}
+                                    <div className="zammad-filter-bar">
+                                        <div className="zammad-filter-group">
+                                            {[
+                                                { id: 'open', label: 'Ouverts' },
+                                                { id: 'pending', label: 'En attente' },
+                                                { id: 'closed', label: 'Fermés' },
+                                                { id: 'all', label: 'Tous' },
+                                            ].map(s => (
+                                                <button key={s.id}
+                                                    className={`zammad-filter-btn ${stateFilter === s.id ? 'active' : ''}`}
+                                                    onClick={() => { setStateFilter(s.id); setPage(1); }}>
+                                                    {s.label}
+                                                </button>
+                                            ))}
+                                        </div>
+                                        {clusterList.length > 0 && (
+                                            <select className="zammad-select"
+                                                value={clusterFilter}
+                                                onChange={e => { setClusterFilter(e.target.value); setPage(1); }}>
+                                                <option value="">Tous les clusters</option>
+                                                {clusterList.map(c => (
+                                                    <option key={c.id} value={c.id}>{c.name}</option>
+                                                ))}
+                                            </select>
+                                        )}
+                                        <input className="zammad-search" placeholder="Rechercher…" value={searchQ}
+                                            onChange={e => { setSearchQ(e.target.value); setPage(1); }} />
+                                    </div>
+
+                                    {/* Ticket list */}
+                                    {ticketsLoading ? (
+                                        <div className="zammad-loading">Chargement des tickets…</div>
+                                    ) : tickets.length === 0 ? (
+                                        <div className="zammad-empty">
+                                            <div style={{fontSize:36,marginBottom:8}}>✅</div>
+                                            <div>Aucun ticket trouvé</div>
+                                        </div>
+                                    ) : (
+                                        <div className="zammad-ticket-table">
+                                            <div className="zammad-ticket-thead">
+                                                <div className="zt-col-num">#</div>
+                                                <div className="zt-col-title">Sujet</div>
+                                                <div className="zt-col-org">Organisation</div>
+                                                <div className="zt-col-state">Statut</div>
+                                                <div className="zt-col-prio">Priorité</div>
+                                                <div className="zt-col-date">Mis à jour</div>
+                                                <div className="zt-col-action"></div>
+                                            </div>
+                                            {tickets.map(tk => (
+                                                <div key={tk.id} className="zammad-ticket-row">
+                                                    <div className="zt-col-num">#{tk.number || tk.id}</div>
+                                                    <div className="zt-col-title">
+                                                        <span className="zt-title-text">{tk.title}</span>
+                                                        {tk.customer && <span className="zt-customer">{tk.customer}</span>}
+                                                    </div>
+                                                    <div className="zt-col-org">{tk.organization || '—'}</div>
+                                                    <div className="zt-col-state">
+                                                        <span className={`zammad-badge state-${stateColor(tk.state)}`}>{tk.state}</span>
+                                                    </div>
+                                                    <div className="zt-col-prio">
+                                                        <span className={`zammad-badge prio-${priorityColor(tk.priority)}`}>{tk.priority}</span>
+                                                    </div>
+                                                    <div className="zt-col-date">{fmtDate(tk.updated_at)}</div>
+                                                    <div className="zt-col-action">
+                                                        <a href={tk.url} target="_blank" rel="noopener noreferrer" className="zammad-open-btn">↗</a>
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Pagination */}
+                                    {(page > 1 || tickets.length === 25) && (
+                                        <div className="zammad-pagination">
+                                            <button className="zammad-page-btn" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Précédent</button>
+                                            <span className="zammad-page-info">Page {page}</span>
+                                            <button className="zammad-page-btn" disabled={tickets.length < 25} onClick={() => setPage(p => p + 1)}>Suivant →</button>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── Clusters liés tab ── */}
+                    {subTab === 'clusters' && (
+                        <div className="zammad-clusters-pane">
+                            {!isConfigured ? (
+                                <div className="zammad-empty">Configurez Zammad d'abord.</div>
+                            ) : clusterList.length === 0 ? (
+                                <div className="zammad-empty">Aucun cluster disponible.</div>
+                            ) : (
+                                <div className="zammad-cluster-list">
+                                    <p className="zammad-hint">Liez chaque cluster à une organisation Zammad pour filtrer les tickets par client.</p>
+                                    {clusterList.map(cl => {
+                                        const link = links[cl.id];
+                                        const isLinking = linkingCluster === cl.id;
+                                        return (
+                                            <div key={cl.id} className="zammad-cluster-row">
+                                                <div className="zcl-info">
+                                                    <span className="zcl-name">{cl.name}</span>
+                                                    {link
+                                                        ? <span className="zcl-linked">🔗 {link.org_name}</span>
+                                                        : <span className="zcl-unlinked">Non lié</span>
+                                                    }
+                                                </div>
+                                                <div className="zcl-actions">
+                                                    {link && (
+                                                        <button className="zammad-unlink-btn" onClick={() => handleUnlink(cl.id)}>Délier</button>
+                                                    )}
+                                                    <button className="zammad-link-btn" onClick={() => {
+                                                        setLinkingCluster(isLinking ? null : cl.id);
+                                                        setOrgs([]); setOrgSearch('');
+                                                    }}>
+                                                        {isLinking ? 'Annuler' : (link ? 'Changer' : 'Lier')}
+                                                    </button>
+                                                </div>
+                                                {isLinking && (
+                                                    <div className="zcl-org-picker">
+                                                        <input className="zammad-search"
+                                                            placeholder="Rechercher une organisation Zammad…"
+                                                            value={orgSearch}
+                                                            onChange={e => handleSearchOrgs(e.target.value)} />
+                                                        {orgLoading && <div className="zammad-loading-sm">Recherche…</div>}
+                                                        {orgs.length > 0 && (
+                                                            <div className="zcl-org-results">
+                                                                {orgs.map(o => (
+                                                                    <button key={o.id} className="zcl-org-item"
+                                                                        onClick={() => handleLink(cl.id, cl.name, o.id, o.name)}>
+                                                                        <strong>{o.name}</strong>
+                                                                        {o.note && <span style={{opacity:.6, marginLeft:6}}>{o.note}</span>}
+                                                                    </button>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── Config tab ── */}
+                    {subTab === 'config' && (
+                        <div className="zammad-config-pane">
+                            <div className="zammad-config-section">
+                                <div className="zammad-config-title">Connexion Zammad</div>
+                                <div className="zammad-field">
+                                    <label>URL Zammad</label>
+                                    <input className="zammad-input" type="url" placeholder="https://support.example.com"
+                                        value={form.zammad_url} onChange={e => setForm(f => ({...f, zammad_url: e.target.value}))} />
+                                </div>
+                                <div className="zammad-field">
+                                    <label>Token API</label>
+                                    <input className="zammad-input" type="password" placeholder="Paramètres → API → Token Access"
+                                        value={form.api_token} onChange={e => setForm(f => ({...f, api_token: e.target.value}))} />
+                                </div>
+                                <div className="zammad-field-row">
+                                    <label className="zammad-toggle-label">
+                                        <input type="checkbox" checked={form.verify_ssl}
+                                            onChange={e => setForm(f => ({...f, verify_ssl: e.target.checked}))} />
+                                        Vérifier le certificat SSL
+                                    </label>
+                                </div>
+                                <div className="zammad-config-actions">
+                                    <button className="zammad-btn-ghost" onClick={handleTest} disabled={testLoading}>
+                                        {testLoading ? 'Test…' : '🔌 Tester la connexion'}
+                                    </button>
+                                    <button className="zammad-btn-primary" onClick={handleSave} disabled={saveLoading}>
+                                        {saveLoading ? 'Sauvegarde…' : 'Sauvegarder'}
+                                    </button>
+                                    {saveMsg && <span className="zammad-save-msg">{saveMsg}</span>}
+                                </div>
+                                {testResult && (
+                                    <div className={`zammad-test-result ${testResult.success ? 'ok' : 'err'}`}>
+                                        {testResult.success
+                                            ? `✓ Connecté en tant que ${testResult.name || testResult.login} (${testResult.email})`
+                                            : `✗ ${testResult.error}`}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="zammad-config-hint">
+                                <strong>Comment créer un token Zammad :</strong><br/>
+                                Profil → Paramètres → Token Access → <em>Créer un token</em><br/>
+                                Permission requise : <code>ticket.agent</code>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        // ════════════════════════════════════════════════════════════════
+        // Grafana Plugin View
+        // ════════════════════════════════════════════════════════════════
+        function GrafanaView({ authFetch }) {
+            const API = `${API_URL}/plugins/grafana/api`;
+
+            const [subTab, setSubTab]       = useState('dashboards'); // dashboards | config
+            const [cfg, setCfg]             = useState(null);          // plugin config from backend
+            const [pinned, setPinned]        = useState([]);
+            const [openDash, setOpenDash]    = useState(null);         // currently viewed dashboard
+            const [showBrowser, setShowBrowser] = useState(false);     // browse all dashboards
+            const [allDashes, setAllDashes]  = useState([]);
+            const [dashSearch, setDashSearch] = useState('');
+            const [loadingDashes, setLoadingDashes] = useState(false);
+
+            // Config form state
+            const [form, setForm] = useState({ grafana_url:'', api_url:'', api_key:'', verify_ssl:false, theme:'dark', org_id:1 });
+            const [testResult, setTestResult]   = useState(null);
+            const [testLoading, setTestLoading] = useState(false);
+            const [saveLoading, setSaveLoading] = useState(false);
+            const [saveMsg, setSaveMsg]         = useState('');
+
+            // Load config on mount
+            React.useEffect(() => {
+                (async () => {
+                    try {
+                        const r = await authFetch(`${API}/config`);
+                        if (r && r.ok) {
+                            const data = await r.json();
+                            setCfg(data);
+                            setPinned(data.pinned || []);
+                            setForm(f => ({
+                                ...f,
+                                grafana_url: data.grafana_url || '',
+                                api_url:     data.api_url     || '',
+                                api_key:     data.api_key === '***' ? '' : (data.api_key || ''),
+                                verify_ssl:  data.verify_ssl  || false,
+                                theme:       data.theme        || 'dark',
+                                org_id:      data.org_id       || 1,
+                            }));
+                        }
+                    } catch (e) {}
+                })();
+            }, []);
+
+            // Test connection
+            const handleTest = async () => {
+                setTestLoading(true);
+                setTestResult(null);
+                try {
+                    const r = await authFetch(`${API}/test`);
+                    if (r && r.ok) setTestResult(await r.json());
+                    else setTestResult({ success: false, error: `HTTP ${r?.status}` });
+                } catch (e) {
+                    setTestResult({ success: false, error: String(e) });
+                } finally {
+                    setTestLoading(false);
+                }
+            };
+
+            // Check iframe headers
+            const handleCheckHeaders = async () => {
+                setTestLoading(true);
+                setTestResult(null);
+                try {
+                    const r = await authFetch(`${API}/check-headers`);
+                    if (r && r.ok) setTestResult(await r.json());
+                    else setTestResult({ success: false, error: `HTTP ${r?.status}` });
+                } catch (e) {
+                    setTestResult({ success: false, error: String(e) });
+                } finally {
+                    setTestLoading(false);
+                }
+            };
+
+            // Save config
+            const handleSave = async () => {
+                setSaveLoading(true);
+                setSaveMsg('');
+                try {
+                    const payload = { ...form };
+                    if (!payload.api_key) delete payload.api_key; // don't overwrite with blank
+                    const r = await authFetch(`${API}/config/save`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload),
+                    });
+                    if (r && r.ok) {
+                        setSaveMsg('Sauvegardé !');
+                        // re-fetch to get masked key
+                        const r2 = await authFetch(`${API}/config`);
+                        if (r2 && r2.ok) {
+                            const d = await r2.json();
+                            setCfg(d);
+                            setPinned(d.pinned || []);
+                        }
+                    } else {
+                        setSaveMsg('Erreur lors de la sauvegarde');
+                    }
+                } catch (e) {
+                    setSaveMsg('Erreur : ' + String(e));
+                } finally {
+                    setSaveLoading(false);
+                    setTimeout(() => setSaveMsg(''), 3000);
+                }
+            };
+
+            // Load all dashboards from Grafana
+            const loadAllDashes = async (q) => {
+                setLoadingDashes(true);
+                try {
+                    const url = q ? `${API}/dashboards?q=${encodeURIComponent(q)}` : `${API}/dashboards`;
+                    const r = await authFetch(url);
+                    if (r && r.ok) {
+                        const d = await r.json();
+                        setAllDashes(d.dashboards || []);
+                    } else {
+                        setAllDashes([]);
+                    }
+                } catch (e) {
+                    setAllDashes([]);
+                } finally {
+                    setLoadingDashes(false);
+                }
+            };
+
+            const openBrowser = () => { setShowBrowser(true); loadAllDashes(''); };
+
+            // Pin / unpin
+            const pinDash = async (dash) => {
+                try {
+                    const r = await authFetch(`${API}/pin`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(dash),
+                    });
+                    if (r && r.ok) { const d = await r.json(); setPinned(d.pinned || []); }
+                } catch (e) {}
+            };
+            const unpinDash = async (uid) => {
+                try {
+                    const r = await authFetch(`${API}/unpin`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ uid }),
+                    });
+                    if (r && r.ok) { const d = await r.json(); setPinned(d.pinned || []); }
+                } catch (e) {}
+            };
+
+            // Build iframe URL for a dashboard
+            const iframeUrl = (uid, slug) => {
+                const base = (cfg?.grafana_url || '').replace(/\/$/, '');
+                const theme = cfg?.theme || 'dark';
+                const orgId = cfg?.org_id || 1;
+                const s = slug || '';
+                return `${base}/d/${uid}/${s}?orgId=${orgId}&kiosk=tv&theme=${theme}&refresh=30s`;
+            };
+
+            const notConfigured = !cfg?.configured;
+            const pinnedUIDs = new Set(pinned.map(p => p.uid));
+
+            // ── Grafana logo SVG ─────────────────────────
+            const GrafanaLogo = () => (
+                <svg viewBox="0 0 40 40" width="28" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                    <circle cx="20" cy="20" r="20" fill="#f46800"/>
+                    <path d="M28.5 19.2c-.1-.7-.3-1.4-.6-2-.6-1.4-1.6-2.6-2.9-3.4-1.3-.8-2.8-1.2-4.3-1.1-1.2.1-2.3.4-3.3 1-.6.4-1.2.8-1.6 1.4-.1-.4-.3-.8-.6-1.1-.6-.7-1.5-1.1-2.4-1.1-.6 0-1.1.2-1.6.5-.5.3-.8.8-1 1.3-.1.4-.1.8 0 1.2.2.6.6 1.1 1.1 1.4.3.2.6.3.9.4v.5c0 1.3.3 2.6.9 3.7.6 1.2 1.5 2.2 2.6 2.9 1.1.7 2.4 1.1 3.7 1.1 1 0 2-.2 2.9-.7.9-.4 1.7-1.1 2.2-1.9.3.3.7.6 1.1.8.7.3 1.5.3 2.2 0 .7-.3 1.2-.9 1.4-1.6.2-.8.1-1.7-.3-2.3z" fill="white"/>
+                </svg>
+            );
+
+            return (
+                <div className="grafana-view">
+                    {/* Header */}
+                    <div className="grafana-header">
+                        <div className="grafana-header-left">
+                            <GrafanaLogo />
+                            <div>
+                                <h2 className="grafana-title">Grafana</h2>
+                                {cfg?.configured && <span className="grafana-connected-badge">
+                                    <span className="grafana-connected-dot"/>
+                                    {(cfg.grafana_url || '').replace(/^https?:\/\//, '')}
+                                </span>}
+                            </div>
+                        </div>
+                        <div className="grafana-subtabs">
+                            {[
+                                { id:'dashboards', label:'Dashboards', icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg> },
+                                { id:'config',     label:'Configuration', icon:<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg> },
+                            ].map(t => (
+                                <button key={t.id} onClick={() => setSubTab(t.id)}
+                                    className={`grafana-subtab ${subTab === t.id ? 'active' : ''}`}>
+                                    {t.icon}{t.label}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* ── Dashboards sub-tab ──────────────────────────── */}
+                    {subTab === 'dashboards' && (
+                        <div className="grafana-dashboards-pane">
+                            {notConfigured ? (
+                                <div className="grafana-empty">
+                                    <GrafanaLogo />
+                                    <p className="grafana-empty-title">Grafana n'est pas encore configuré</p>
+                                    <p className="grafana-empty-sub">Renseigne l'URL et la clé API dans l'onglet <b>Configuration</b> pour commencer.</p>
+                                    <button className="grafana-btn-primary" onClick={() => setSubTab('config')}>
+                                        Configurer Grafana
+                                    </button>
+                                </div>
+                            ) : openDash ? (
+                                /* ── Iframe viewer ─────────────────────────── */
+                                <div className="grafana-iframe-wrap">
+                                    <div className="grafana-iframe-bar">
+                                        <button className="grafana-back-btn" onClick={() => setOpenDash(null)}>
+                                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+                                            Retour
+                                        </button>
+                                        <span className="grafana-iframe-title">{openDash.title}</span>
+                                        <a href={iframeUrl(openDash.uid, openDash.slug)} target="_blank" rel="noopener noreferrer"
+                                            className="grafana-external-btn">
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            Ouvrir dans Grafana
+                                        </a>
+                                    </div>
+                                    <iframe
+                                        src={iframeUrl(openDash.uid, openDash.slug)}
+                                        className="grafana-iframe"
+                                        title={openDash.title}
+                                        allowFullScreen
+                                        onError={() => {}}
+                                    />
+                                    {/* Fallback overlay — shown under the iframe when blocked */}
+                                    <div className="grafana-iframe-blocked">
+                                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="1.5"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+                                        <p>L'iframe est bloquée par Grafana</p>
+                                        <p className="grafana-iframe-blocked-sub">
+                                            Ajoute dans <code>grafana.ini</code> :<br/>
+                                            <code>[security]<br/>allow_embedding = true</code><br/>
+                                            <br/>
+                                            Docker : <code>GF_SECURITY_ALLOW_EMBEDDING=true</code><br/>
+                                            <br/>
+                                            Puis connecte-toi à Grafana dans un onglet — l'accès anonyme n'est pas nécessaire.
+                                        </p>
+                                        <a href={iframeUrl(openDash.uid, openDash.slug)} target="_blank" rel="noopener noreferrer"
+                                            className="grafana-btn-primary" style={{textDecoration:'none', marginTop:8}}>
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+                                            Ouvrir dans Grafana
+                                        </a>
+                                    </div>
+                                </div>
+                            ) : (
+                                /* ── Dashboard cards ─────────────────────────── */
+                                <>
+                                    <div className="grafana-dash-toolbar">
+                                        <span className="grafana-dash-toolbar-title">
+                                            {pinned.length > 0 ? `${pinned.length} dashboard${pinned.length > 1 ? 's' : ''} épinglé${pinned.length > 1 ? 's' : ''}` : 'Aucun dashboard épinglé'}
+                                        </span>
+                                        <button className="grafana-btn-primary" onClick={openBrowser}>
+                                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                            Parcourir les dashboards
+                                        </button>
+                                    </div>
+
+                                    {pinned.length === 0 ? (
+                                        <div className="grafana-empty">
+                                            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.15)" strokeWidth="1.5"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                                            <p className="grafana-empty-title">Aucun dashboard épinglé</p>
+                                            <p className="grafana-empty-sub">Parcours tes dashboards Grafana et épingle tes favoris ici.</p>
+                                        </div>
+                                    ) : (
+                                        <div className="grafana-dash-grid">
+                                            {pinned.map(dash => (
+                                                <div key={dash.uid} className="grafana-dash-card" onClick={() => setOpenDash(dash)}>
+                                                    <div className="grafana-dash-card-icon">
+                                                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                                                    </div>
+                                                    <div className="grafana-dash-card-body">
+                                                        <div className="grafana-dash-card-title">{dash.title}</div>
+                                                        {dash.tags && dash.tags.length > 0 && (
+                                                            <div className="grafana-dash-tags">
+                                                                {dash.tags.slice(0,3).map(tag => (
+                                                                    <span key={tag} className="grafana-dash-tag">{tag}</span>
+                                                                ))}
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <button
+                                                        className="grafana-unpin-btn"
+                                                        title="Désépingler"
+                                                        onClick={e => { e.stopPropagation(); unpinDash(dash.uid); }}
+                                                    >
+                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                    </button>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+
+                                    {/* Browse all dashboards overlay */}
+                                    {showBrowser && (
+                                        <div className="grafana-browser-overlay" onClick={() => setShowBrowser(false)}>
+                                            <div className="grafana-browser-panel" onClick={e => e.stopPropagation()}>
+                                                <div className="grafana-browser-header">
+                                                    <span>Parcourir les dashboards Grafana</span>
+                                                    <button onClick={() => setShowBrowser(false)} className="grafana-browser-close">
+                                                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                                                    </button>
+                                                </div>
+                                                <div className="grafana-browser-search">
+                                                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="Rechercher un dashboard…"
+                                                        value={dashSearch}
+                                                        onChange={e => { setDashSearch(e.target.value); loadAllDashes(e.target.value); }}
+                                                        autoFocus
+                                                    />
+                                                </div>
+                                                <div className="grafana-browser-list">
+                                                    {loadingDashes ? (
+                                                        <div className="grafana-browser-loading">Chargement…</div>
+                                                    ) : allDashes.length === 0 ? (
+                                                        <div className="grafana-browser-loading">Aucun dashboard trouvé</div>
+                                                    ) : allDashes.map(dash => (
+                                                        <div key={dash.uid} className="grafana-browser-item">
+                                                            <div className="grafana-browser-item-info">
+                                                                <span className="grafana-browser-item-title">{dash.title}</span>
+                                                                {dash.folder && <span className="grafana-browser-item-folder">{dash.folder}</span>}
+                                                                {dash.tags && dash.tags.length > 0 && (
+                                                                    <div className="grafana-dash-tags" style={{marginTop:2}}>
+                                                                        {dash.tags.slice(0,3).map(t => <span key={t} className="grafana-dash-tag">{t}</span>)}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                            <div className="grafana-browser-item-actions">
+                                                                <button
+                                                                    className="grafana-btn-ghost"
+                                                                    onClick={() => { setOpenDash(dash); setShowBrowser(false); }}
+                                                                >
+                                                                    Ouvrir
+                                                                </button>
+                                                                {pinnedUIDs.has(dash.uid) ? (
+                                                                    <button className="grafana-pin-btn pinned" onClick={() => unpinDash(dash.uid)} title="Désépingler">
+                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                                                                    </button>
+                                                                ) : (
+                                                                    <button className="grafana-pin-btn" onClick={() => pinDash(dash)} title="Épingler">
+                                                                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
+                                                                    </button>
+                                                                )}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
+                                </>
+                            )}
+                        </div>
+                    )}
+
+                    {/* ── Config sub-tab ───────────────────────────────── */}
+                    {subTab === 'config' && (
+                        <div className="grafana-config-pane">
+                            <div className="grafana-config-section">
+                                <h3 className="grafana-config-section-title">Connexion Grafana</h3>
+
+                                <div className="grafana-field">
+                                    <label>URL Grafana <span className="grafana-field-hint">(accessible par le navigateur, pour les iframes)</span></label>
+                                    <input type="text" value={form.grafana_url} onChange={e => setForm(f=>({...f,grafana_url:e.target.value}))}
+                                        placeholder="http://grafana:3000" className="grafana-input" />
+                                </div>
+
+                                <div className="grafana-field">
+                                    <label>URL API backend <span className="grafana-field-hint">(optionnel — si différent de l'URL ci-dessus)</span></label>
+                                    <input type="text" value={form.api_url} onChange={e => setForm(f=>({...f,api_url:e.target.value}))}
+                                        placeholder="Identique à l'URL Grafana si vide" className="grafana-input" />
+                                </div>
+
+                                <div className="grafana-field">
+                                    <label>Clé API / Service Account Token</label>
+                                    <input type="password" value={form.api_key} onChange={e => setForm(f=>({...f,api_key:e.target.value}))}
+                                        placeholder={cfg?.api_key === '***' ? '(clé existante — laisser vide pour garder)' : 'glsa_…'}
+                                        className="grafana-input" />
+                                    <p className="grafana-field-hint-block">Créer dans Grafana : Administration → Service Accounts → Add token (rôle Viewer suffit)</p>
+                                </div>
+
+                                <div className="grafana-field-row">
+                                    <div className="grafana-field">
+                                        <label>Thème iframe</label>
+                                        <select value={form.theme} onChange={e => setForm(f=>({...f,theme:e.target.value}))} className="grafana-input">
+                                            <option value="dark">Dark</option>
+                                            <option value="light">Light</option>
+                                        </select>
+                                    </div>
+                                    <div className="grafana-field">
+                                        <label>Org ID</label>
+                                        <input type="number" value={form.org_id} min="1" onChange={e => setForm(f=>({...f,org_id:parseInt(e.target.value)||1}))}
+                                            className="grafana-input" style={{width:80}} />
+                                    </div>
+                                    <div className="grafana-field" style={{justifyContent:'flex-end', paddingTop:20}}>
+                                        <label className="grafana-toggle-label">
+                                            <input type="checkbox" checked={form.verify_ssl} onChange={e => setForm(f=>({...f,verify_ssl:e.target.checked}))} />
+                                            Vérifier SSL
+                                        </label>
+                                    </div>
+                                </div>
+
+                                {/* Test + Save buttons */}
+                                <div className="grafana-config-actions">
+                                    <button className="grafana-btn-ghost" onClick={handleTest} disabled={testLoading || !form.grafana_url}>
+                                        {testLoading ? 'Test en cours…' : 'Tester la connexion'}
+                                    </button>
+                                    <button className="grafana-btn-ghost" onClick={handleCheckHeaders} disabled={testLoading || !form.grafana_url} title="Vérifie si les headers X-Frame-Options et CSP bloquent l'embed">
+                                        🔍 Diagnostiquer iframe
+                                    </button>
+                                    <button className="grafana-btn-primary" onClick={handleSave} disabled={saveLoading}>
+                                        {saveLoading ? 'Sauvegarde…' : 'Sauvegarder'}
+                                    </button>
+                                    {saveMsg && <span className={`grafana-save-msg ${saveMsg.includes('Err') ? 'error' : ''}`}>{saveMsg}</span>}
+                                </div>
+
+                                {/* Test result */}
+                                {testResult && (
+                                    <div className={`grafana-test-result ${testResult.success ? 'ok' : 'err'}`} style={{flexDirection:'column', alignItems:'flex-start', gap:6}}>
+                                        <div style={{display:'flex', alignItems:'center', gap:7}}>
+                                            {testResult.success ? (
+                                                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                                                {testResult.version ? `Connexion réussie — Grafana ${testResult.version}` : (testResult.embed_ok ? 'Aucun blocage iframe détecté ✓' : 'Blocage iframe détecté')}</>
+                                            ) : (
+                                                <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16" strokeWidth="3" strokeLinecap="round"/></svg>
+                                                {testResult.error}</>
+                                            )}
+                                        </div>
+                                        {testResult.issues && testResult.issues.map((line, i) => (
+                                            <div key={i} style={{fontFamily:'monospace', fontSize:11, opacity:.8}}>{line}</div>
+                                        ))}
+                                        {testResult.fix && testResult.fix.length > 0 && (
+                                            <pre style={{margin:'4px 0 0', padding:'8px 10px', background:'rgba(0,0,0,0.3)', borderRadius:6, fontSize:11, fontFamily:'monospace', whiteSpace:'pre-wrap', opacity:.9}}>
+                                                {testResult.fix.join('\n')}
+                                            </pre>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Grafana setup reminder */}
+                            <div className="grafana-config-section grafana-config-hint-box">
+                                <h3 className="grafana-config-section-title">Configuration requise côté Grafana</h3>
+                                <p>Une seule ligne à ajouter dans <code>grafana.ini</code> :</p>
+                                <pre className="grafana-code">{`[security]
+allow_embedding = true`}</pre>
+                                <p style={{marginTop:10, color:'rgba(255,255,255,0.4)', fontSize:11}}>
+                                    Ou en Docker/docker-compose : <code style={{color:'#f46800', background:'rgba(244,104,0,0.1)', padding:'1px 5px', borderRadius:3}}>GF_SECURITY_ALLOW_EMBEDDING=true</code>
+                                </p>
+                                <p style={{marginTop:8, color:'rgba(255,255,255,0.4)', fontSize:11}}>
+                                    ⚠️ L'accès anonyme (<code>auth.anonymous</code>) n'est <strong>pas</strong> nécessaire — Grafana réutilise la session du navigateur. Les utilisateurs doivent simplement être connectés à Grafana au moins une fois dans un onglet.
+                                </p>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
         function PegaProxDashboard() {
             const { t } = useTranslation();
             const { user, sessionId, logout, getAuthHeaders, isAdmin, passwordExpiry } = useAuth();
-            const { isCorporate } = useLayout(); // LW: Feb 2026 - corporate layout
+            const { isCorporate, isFocus, isAnalytics } = useLayout(); // layouts
             const [clusters, setClusters] = useState([]);
             const [clusterGroups, setClusterGroups] = useState([]); // NS Jan 2026 - for grouping
             const [collapsedGroups, setCollapsedGroups] = useState({}); // Track which groups are collapsed
@@ -2456,6 +3652,8 @@
             const expandedSidebarClustersRef = useRef({});
             const sseClientIdRef = useRef(null);  // capture from SSE connected msg
             const sidebarClusterDataRef = useRef({});
+            // NS: cluster-wide history for trend chart (20 samples, ~2 min at 5s poll)
+            const clusterHistRef = useRef({ cpu: [], mem: [] });
             const selectedVMwareRef = useRef(null);  // for SSE VMware events
             const vmwareSelectedVmRef = useRef(null);  // for SSE VMware VM detail
             const vmwareSelectedMigrationRef = useRef(null);  // for SSE migration updates
@@ -2622,6 +3820,16 @@
             }, [selectedCluster]);
             
             useEffect(() => { expandedSidebarClustersRef.current = expandedSidebarClusters; }, [expandedSidebarClusters]);
+            // NS: sample cluster-wide CPU/RAM for trend chart
+            useEffect(() => {
+                const vals = Object.values(clusterMetrics).filter(m => m?.cpu_percent != null);
+                if (!vals.length) return;
+                const avgCpu = vals.reduce((s, m) => s + m.cpu_percent, 0) / vals.length;
+                const avgMem = vals.reduce((s, m) => s + (m.mem_percent || 0), 0) / vals.length;
+                const h = clusterHistRef.current;
+                h.cpu = [...h.cpu, avgCpu].slice(-20);
+                h.mem = [...h.mem, avgMem].slice(-20);
+            }, [clusterMetrics]);
             useEffect(() => { sidebarClusterDataRef.current = sidebarClusterData; }, [sidebarClusterData]);
             useEffect(() => { selectedVMwareRef.current = selectedVMware; }, [selectedVMware]);
             useEffect(() => { vmwareSelectedVmRef.current = vmwareSelectedVm; }, [vmwareSelectedVm]);
@@ -7525,10 +8733,21 @@
                         );
                     })()}
 
-                    <div className={`relative ${isCorporate ? 'max-w-full mx-0 px-0 py-0' : 'max-w-[1600px] mx-auto px-6 py-6'}`}>
+                    {/* Focus: global metrics bar */}
+                    {isFocus && (
+                        <FocusMetricsBar clusters={clusters} clusterMetrics={allClusterMetrics} nodeAlerts={nodeAlerts} />
+                    )}
+
+                    {/* Analytics: horizontal cluster nav + KPI bar */}
+                    {isAnalytics && (<>
+                        <AnalyticsTopNav clusters={clusters} selectedCluster={selectedCluster} setSelectedCluster={setSelectedCluster} />
+                        <AnalyticsKPIBar clusters={clusters} clusterMetrics={allClusterMetrics} nodeAlerts={nodeAlerts} />
+                    </>)}
+
+                    <div className={`relative ${isCorporate ? 'max-w-full mx-0 px-0 py-0' : isAnalytics ? 'max-w-full px-6 py-4' : 'max-w-[1600px] mx-auto px-6 py-6'}`}>
                         <div className={`flex ${isCorporate ? 'gap-0' : 'gap-6'}`}>
-                            {/* LW: Feb 2026 - sidebar, resizable in corporate */}
-                            <div className={`${isCorporate ? 'flex-shrink-0 corporate-sidebar' : 'w-72 flex-shrink-0'}`} style={isCorporate ? {width: sidebarWidth + 'px'} : undefined}>
+                            {/* Sidebar: icon-slim in Focus, hidden via CSS in Analytics */}
+                            <div className={`${isCorporate ? 'flex-shrink-0 corporate-sidebar' : isFocus ? 'focus-sidebar' : 'w-72 flex-shrink-0'}`} style={isCorporate ? {width: sidebarWidth + 'px'} : undefined}>
                                 <div className={`sticky top-6 ${isCorporate ? 'space-y-0.5 px-1 py-2' : 'space-y-3 pr-1'} pb-4`} style={{ maxHeight: 'calc(100vh - 3rem)', overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'thin', scrollbarColor: '#4a4a4a transparent' }}>
                                     {/* LW: view switcher (tree/pools/datastores) - horizontal icon toggle */}
                                     {isCorporate && (
@@ -8164,10 +9383,14 @@
                                                 { id: 'reports', labelKey: 'reports', icon: Icons.BarChart },
                                                 { id: 'site-recovery', labelKey: 'siteRecovery', icon: Icons.Shield },
                                                 { id: 'plugins', labelKey: 'plugins', icon: Icons.Package },
+                                                { id: 'grafana', labelKey: 'Grafana', icon: Icons.BarChart, isGrafana: true },
+                                                { id: 'zammad', labelKey: 'Zammad', icon: Icons.MessageSquare, isZammad: true },
                                                 { id: 'settings', labelKey: 'settings', icon: Icons.Settings },
                                             ].filter(tab => {
                                                 if (tab.id === 'site-recovery') return user?.permissions?.includes('site_recovery.view');
                                                 if (tab.id === 'plugins') return user?.permissions?.includes('plugins.view');
+                                                if (tab.id === 'grafana') return enabledPlugins.some(p => p.id === 'grafana');
+                                                if (tab.id === 'zammad') return enabledPlugins.some(p => p.id === 'zammad');
                                                 return true;
                                             }).map(tab => (
                                                 <button
@@ -8177,13 +9400,26 @@
                                                         ? `flex items-center gap-1 ${activeTab === tab.id ? 'active' : ''}`
                                                         : `flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                                                             activeTab === tab.id
-                                                                ? 'bg-proxmox-orange text-white'
+                                                                ? (tab.isGrafana ? 'bg-[#f46800] text-white' : tab.isZammad ? 'bg-[#0080ff] text-white' : 'bg-proxmox-orange text-white')
                                                                 : 'text-gray-400 hover:text-white hover:bg-proxmox-hover'
                                                           }`
                                                     }
+                                                    style={tab.isGrafana && activeTab !== tab.id ? {color:'#f46800'} : tab.isZammad && activeTab !== tab.id ? {color:'#0080ff'} : undefined}
                                                 >
-                                                    <tab.icon className={isCorporate ? 'w-3 h-3' : undefined} />
-                                                    {t(tab.labelKey)}
+                                                    {tab.isGrafana ? (
+                                                        <svg width="14" height="14" viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                            <circle cx="20" cy="20" r="20" fill="currentColor"/>
+                                                            <path d="M28.5 19.2c-.1-.7-.3-1.4-.6-2-.6-1.4-1.6-2.6-2.9-3.4-1.3-.8-2.8-1.2-4.3-1.1-1.2.1-2.3.4-3.3 1-.6.4-1.2.8-1.6 1.4-.1-.4-.3-.8-.6-1.1-.6-.7-1.5-1.1-2.4-1.1-.6 0-1.1.2-1.6.5-.5.3-.8.8-1 1.3-.1.4-.1.8 0 1.2.2.6.6 1.1 1.1 1.4.3.2.6.3.9.4v.5c0 1.3.3 2.6.9 3.7.6 1.2 1.5 2.2 2.6 2.9 1.1.7 2.4 1.1 3.7 1.1 1 0 2-.2 2.9-.7.9-.4 1.7-1.1 2.2-1.9.3.3.7.6 1.1.8.7.3 1.5.3 2.2 0 .7-.3 1.2-.9 1.4-1.6.2-.8.1-1.7-.3-2.3z" fill="white"/>
+                                                        </svg>
+                                                    ) : tab.isZammad ? (
+                                                        <svg width="14" height="14" viewBox="0 0 32 32" fill="none">
+                                                            <rect width="32" height="32" rx="4" fill="currentColor"/>
+                                                            <path d="M8 22l8-12H9v-2h10v2l-8 12h9v2H8v-2z" fill="white"/>
+                                                        </svg>
+                                                    ) : (
+                                                        <tab.icon className={isCorporate ? 'w-3 h-3' : undefined} />
+                                                    )}
+                                                    {tab.isGrafana ? 'Grafana' : tab.isZammad ? 'Zammad' : t(tab.labelKey)}
                                                 </button>
                                             ))}
                                         </div>
@@ -8192,6 +9428,7 @@
                                         {activeTab === 'overview' && (
                                             isCorporate && selectedSidebarNode ? (
                                             <CorporateNodeDetailView
+                                                // modern KPI bar injected via wrapper below
                                                 node={selectedSidebarNode.name}
                                                 clusterId={selectedSidebarNode.clusterId}
                                                 clusterMetrics={selectedSidebarNode.clusterId === selectedCluster?.id ? clusterMetrics : (sidebarClusterData[selectedSidebarNode.clusterId]?.metrics || {})}
@@ -8205,6 +9442,17 @@
                                                 addToast={addToast}
                                             />
                                             ) : (
+                                            <>
+                                            {/* Modern KPI bar — shown only in modern layout with a cluster selected */}
+                                            {!isCorporate && !isAnalytics && selectedCluster && (
+                                                <ModernKPIBar
+                                                    clusterMetrics={clusterMetrics}
+                                                    clusterResources={clusterResources}
+                                                    nodeAlerts={nodeAlerts}
+                                                    knownNodes={knownNodes}
+                                                    clusterHistRef={clusterHistRef}
+                                                />
+                                            )}
                                             <div className={isCorporate ? 'space-y-3' : 'grid grid-cols-1 xl:grid-cols-3 gap-6'}>
                                                 {/* LW: Mar 2026 - content header strip for corporate overview */}
                                                 {isCorporate && selectedCluster && (
@@ -8600,6 +9848,18 @@
                                                 )}
 
                                                 <div className={isCorporate ? 'space-y-3' : 'space-y-6'}>
+                                                    {/* NS: cluster trend panel — modern layout only */}
+                                                    {!isCorporate && (
+                                                        <ClusterTrendPanel
+                                                            clusterHistRef={clusterHistRef}
+                                                            clusterMetrics={clusterMetrics}
+                                                            clusterResources={clusterResources}
+                                                        />
+                                                    )}
+                                                    {/* Zammad stats widget — shown if plugin loaded */}
+                                                    {enabledPlugins.some(p => p.id === 'zammad') && (
+                                                        <ZammadStatsWidget authFetch={authFetch} />
+                                                    )}
                                                     {/* Cluster Health */}
                                                     <ClusterHealth metrics={clusterMetrics} isCorporate={isCorporate} />
 
@@ -8615,6 +9875,7 @@
                                                     </div>
                                                 </div>
                                             </div>
+                                            </>
                                             )
                                         )}
 
@@ -10468,6 +11729,16 @@
                                                 srProgress={srProgress}
                                                 user={user}
                                             />
+                                        )}
+
+                                        {/* Grafana Plugin Tab */}
+                                        {activeTab === 'grafana' && (
+                                            <GrafanaView authFetch={authFetch} />
+                                        )}
+
+                                        {/* Zammad Plugin Tab */}
+                                        {activeTab === 'zammad' && (
+                                            <ZammadView authFetch={authFetch} clusters={clusters} />
                                         )}
 
                                         {/* Plugins Tab */}
@@ -16007,64 +17278,94 @@
                                 {t('layoutSelectionDesc') || 'Choose your preferred interface style. You can change this anytime under My Profile \u2192 Layout Style.'}
                             </p>
 
-                            <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="grid grid-cols-2 gap-3 mb-4">
                                 {/* Modern */}
-                                <button
-                                    onClick={() => pickLayout('modern')}
-                                    disabled={saving}
-                                    className={`p-4 rounded-xl border-2 transition-all hover:scale-[1.03] text-left ${
-                                        (user?.ui_layout || 'modern') === 'modern'
-                                            ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30'
-                                            : 'border-proxmox-border hover:border-gray-500'
-                                    } disabled:opacity-60`}
-                                >
-                                    <div className="h-20 rounded-lg mb-3 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
-                                        <div className="absolute left-0 top-0 bottom-0 w-6 bg-gradient-to-b from-proxmox-orange/30 to-purple-500/20" />
-                                        <div className="absolute right-2 top-2 left-8 h-2.5 rounded-full bg-proxmox-orange/40" />
-                                        <div className="absolute right-2 top-6 left-8 bottom-2 rounded-lg bg-proxmox-card border border-proxmox-border">
-                                            <div className="flex gap-1.5 p-1.5">
-                                                <div className="w-3 h-2 rounded-full bg-proxmox-orange/50" />
-                                                <div className="w-3 h-2 rounded-full bg-gray-600" />
-                                                <div className="w-3 h-2 rounded-full bg-gray-600" />
-                                            </div>
+                                <button onClick={() => pickLayout('modern')} disabled={saving}
+                                    className={`p-3 rounded-xl border-2 transition-all hover:scale-[1.02] text-left ${(user?.ui_layout || 'modern') === 'modern' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'} disabled:opacity-60`}>
+                                    <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                        <div className="absolute left-0 top-0 bottom-0 w-5 bg-gradient-to-b from-proxmox-orange/30 to-purple-500/20" />
+                                        <div className="absolute right-2 top-2 left-7 h-2 rounded-full bg-proxmox-orange/40" />
+                                        <div className="absolute right-2 top-5 left-7 bottom-1.5 rounded bg-proxmox-card border border-proxmox-border">
+                                            <div className="flex gap-1 p-1"><div className="w-2.5 h-1.5 rounded-full bg-proxmox-orange/50" /><div className="w-2.5 h-1.5 rounded-full bg-gray-600" /></div>
                                         </div>
                                     </div>
                                     <div className="text-center">
-                                        <span className="text-sm font-medium text-white">{t('layoutModern') || 'Modern'}</span>
-                                        <p className="text-xs text-gray-500 mt-0.5">{t('layoutModernDesc') || 'Cards, animations, gradients'}</p>
+                                        <span className="text-xs font-semibold text-white">{t('layoutModern') || 'Contemporain'}</span>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Cards, animations</p>
                                     </div>
                                 </button>
 
                                 {/* Corporate */}
-                                <button
-                                    onClick={() => pickLayout('corporate')}
-                                    disabled={saving}
-                                    className={`p-4 rounded-xl border-2 transition-all hover:scale-[1.03] text-left ${
-                                        user?.ui_layout === 'corporate'
-                                            ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30'
-                                            : 'border-proxmox-border hover:border-gray-500'
-                                    } disabled:opacity-60`}
-                                >
-                                    <div className="h-20 rounded mb-3 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
-                                        <div className="absolute left-0 top-0 bottom-0 w-6 bg-proxmox-card border-r border-proxmox-border">
-                                            <div className="mt-2 ml-1.5 space-y-1">
-                                                <div className="w-3 h-0.5 bg-gray-500" />
-                                                <div className="w-2.5 h-0.5 bg-gray-600 ml-1" />
-                                                <div className="w-2.5 h-0.5 bg-gray-600 ml-1" />
-                                                <div className="w-3 h-0.5 bg-gray-500" />
-                                                <div className="w-2.5 h-0.5 bg-gray-600 ml-1" />
-                                            </div>
+                                <button onClick={() => pickLayout('corporate')} disabled={saving}
+                                    className={`p-3 rounded-xl border-2 transition-all hover:scale-[1.02] text-left ${user?.ui_layout === 'corporate' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'} disabled:opacity-60`}>
+                                    <div className="h-16 rounded mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                        <div className="absolute left-0 top-0 bottom-0 w-5 bg-proxmox-card border-r border-proxmox-border">
+                                            <div className="mt-1.5 ml-1 space-y-0.5"><div className="w-2.5 h-0.5 bg-gray-500" /><div className="w-2 h-0.5 bg-gray-600 ml-0.5" /><div className="w-2 h-0.5 bg-gray-600 ml-0.5" /><div className="w-2.5 h-0.5 bg-gray-500" /></div>
                                         </div>
-                                        <div className="absolute right-2 top-2 left-8 h-2.5 bg-proxmox-card border-b border-proxmox-border flex items-end gap-1.5 px-1">
-                                            <div className="w-4 h-0.5 bg-proxmox-orange" />
-                                            <div className="w-4 h-0.5 bg-gray-600" />
-                                            <div className="w-4 h-0.5 bg-gray-600" />
+                                        <div className="absolute right-1.5 top-1.5 left-7 h-2 bg-proxmox-card border-b border-proxmox-border flex items-end gap-1 px-1">
+                                            <div className="w-3 h-0.5 bg-proxmox-orange" /><div className="w-3 h-0.5 bg-gray-600" />
                                         </div>
-                                        <div className="absolute right-2 top-6 left-8 bottom-2 bg-proxmox-card border border-proxmox-border" />
+                                        <div className="absolute right-1.5 top-5 left-7 bottom-1.5 bg-proxmox-card border border-proxmox-border" />
                                     </div>
                                     <div className="text-center">
-                                        <span className="text-sm font-medium text-white">{t('layoutCorporate') || 'Corporate'}</span>
-                                        <p className="text-xs text-gray-500 mt-0.5">{t('layoutCorporateDesc') || 'Enterprise style, dense'}</p>
+                                        <span className="text-xs font-semibold text-white">{t('layoutCorporate') || 'Corporate'}</span>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Enterprise, compact</p>
+                                    </div>
+                                </button>
+
+                                {/* Focus */}
+                                <button onClick={() => pickLayout('focus')} disabled={saving}
+                                    className={`p-3 rounded-xl border-2 transition-all hover:scale-[1.02] text-left ${user?.ui_layout === 'focus' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'} disabled:opacity-60`}>
+                                    <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                        {/* slim icon sidebar */}
+                                        <div className="absolute left-0 top-0 bottom-0 w-3 bg-proxmox-card border-r border-proxmox-border flex flex-col items-center pt-1.5 gap-1">
+                                            <div className="w-1.5 h-1.5 rounded-sm bg-proxmox-orange/70" />
+                                            <div className="w-1.5 h-1.5 rounded-sm bg-gray-600" />
+                                            <div className="w-1.5 h-1.5 rounded-sm bg-gray-600" />
+                                        </div>
+                                        {/* metrics bar */}
+                                        <div className="absolute left-3 right-0 top-0 h-3 border-b border-proxmox-border flex items-center gap-1.5 px-1.5">
+                                            <div className="w-4 h-1 rounded-full bg-green-500/50" />
+                                            <div className="w-4 h-1 rounded-full bg-blue-500/50" />
+                                            <div className="w-4 h-1 rounded-full bg-orange-500/50" />
+                                        </div>
+                                        {/* content cards */}
+                                        <div className="absolute left-5 right-1.5 top-4 bottom-1.5 grid grid-cols-2 gap-1">
+                                            <div className="bg-proxmox-card border border-proxmox-border rounded" />
+                                            <div className="bg-proxmox-card border border-proxmox-border rounded" />
+                                        </div>
+                                    </div>
+                                    <div className="text-center">
+                                        <span className="text-xs font-semibold text-white">Focus</span>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">Sidebar slim + métriques</p>
+                                    </div>
+                                </button>
+
+                                {/* Analytics */}
+                                <button onClick={() => pickLayout('analytics')} disabled={saving}
+                                    className={`p-3 rounded-xl border-2 transition-all hover:scale-[1.02] text-left ${user?.ui_layout === 'analytics' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'} disabled:opacity-60`}>
+                                    <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                        {/* top nav */}
+                                        <div className="absolute left-0 right-0 top-0 h-3.5 border-b border-proxmox-border flex items-center gap-1 px-1.5">
+                                            <div className="w-3 h-1.5 rounded bg-proxmox-orange/60" />
+                                            <div className="w-3 h-1.5 rounded bg-gray-600" />
+                                            <div className="w-3 h-1.5 rounded bg-gray-600" />
+                                        </div>
+                                        {/* KPI cards row */}
+                                        <div className="absolute left-1.5 right-1.5 top-5 h-4 grid grid-cols-4 gap-0.5">
+                                            <div className="bg-green-500/20 border border-green-500/30 rounded-sm" />
+                                            <div className="bg-blue-500/20 border border-blue-500/30 rounded-sm" />
+                                            <div className="bg-orange-500/20 border border-orange-500/30 rounded-sm" />
+                                            <div className="bg-purple-500/20 border border-purple-500/30 rounded-sm" />
+                                        </div>
+                                        {/* chart area */}
+                                        <div className="absolute left-1.5 right-1.5 top-10 bottom-1.5 bg-proxmox-card border border-proxmox-border rounded-sm flex items-end gap-0.5 px-1 pb-0.5">
+                                            {[40,65,45,80,55,70,90].map((h,i) => <div key={i} className="flex-1 rounded-sm bg-proxmox-orange/40" style={{height:`${h}%`}} />)}
+                                        </div>
+                                    </div>
+                                    <div className="text-center">
+                                        <span className="text-xs font-semibold text-white">Analytics</span>
+                                        <p className="text-[10px] text-gray-500 mt-0.5">KPIs + graphiques</p>
                                     </div>
                                 </button>
                             </div>

@@ -1,0 +1,9 @@
+{
+    "id": "zammad",
+    "name": "Zammad",
+    "version": "1.0.0",
+    "author": "PegaProx Team",
+    "description": "Intégration Zammad : statistiques de tickets sur le tableau de bord et historique complet des tickets par client, liés à vos clusters PegaProx.",
+    "min_pegaprox": "0.7.0",
+    "category": "support"
+}

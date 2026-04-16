@@ -59,6 +59,28 @@ def add_allowed_origin(origin: str):
         logging.info(f"Auto-allowed CORS origin: {origin}")
 
 
+def _get_grafana_frame_src():
+    """Read Grafana plugin config and return a frame-src string segment.
+    Returns ' https://grafana.example.com' (with leading space) or '' if not configured."""
+    try:
+        from pegaprox.constants import PLUGINS_DIR
+        import json
+        cfg_path = Path(PLUGINS_DIR) / 'grafana' / 'config.json'
+        if cfg_path.exists():
+            cfg = json.loads(cfg_path.read_text(encoding='utf-8'))
+            url = (cfg.get('grafana_url') or '').rstrip('/')
+            if url:
+                # Extract origin only (scheme + host)
+                from urllib.parse import urlparse
+                parsed = urlparse(url)
+                origin = f'{parsed.scheme}://{parsed.netloc}'
+                if origin and parsed.netloc:
+                    return f' {origin}'
+    except Exception:
+        pass
+    return ''
+
+
 def create_app():
     """Flask application factory."""
     # root_path must point to the project root (parent of pegaprox/)
@@ -176,6 +198,8 @@ def create_app():
         response.headers['Permissions-Policy'] = 'geolocation=(), microphone=(), camera=()'
 
         # MK: Mar 2026 - tightened CSP, removed dead tailwindcss CDN ref (#118)
+        # NS: Apr 2026 - allow iframe for Grafana plugin (frame-src), read allowed origins from plugin config
+        _grafana_frame_src = _get_grafana_frame_src()
         csp = (
             "default-src 'self'; "
             "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
@@ -185,6 +209,7 @@ def create_app():
             "font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com; "
             "img-src 'self' data: blob:; "
             "connect-src 'self' wss: ws: https://cdn.jsdelivr.net; "
+            f"frame-src 'self'{_grafana_frame_src}; "
             "frame-ancestors 'none'; "
             "base-uri 'self'; "
             "form-action 'self'"
@@ -467,6 +492,15 @@ export * from '/static/js/novnc/core/rfb.js';
 
 def main(debug_mode=False):
     """Main entry point - starts PegaProx server."""
+    # Windows: CMD/PowerShell defaults to cp1252 which breaks Unicode chars (✓ ✗ ⚠).
+    # Force UTF-8 so startup messages print correctly.
+    if sys.platform == 'win32':
+        try:
+            sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+            sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
     from pegaprox.utils.auth import load_users, load_sessions, create_default_users
     from pegaprox.utils.audit import load_audit_log
     from pegaprox.core.config import load_config
@@ -828,6 +862,13 @@ def main(debug_mode=False):
     # Start with Gevent if available
     use_gevent = os.environ.get('PEGAPROX_SERVER', 'auto').lower()
 
+    # Windows: gevent monkey-patches SSL in a way that causes TLS handshake deadlocks.
+    # Connections are accepted but the handshake never completes → browser can't connect.
+    # Fall back to Flask dev server on Windows unless user explicitly forces gevent.
+    if sys.platform == 'win32' and use_gevent == 'auto':
+        print("Windows detected — skipping gevent (SSL compatibility mode)")
+        use_gevent = 'flask'
+
     if use_gevent == 'gevent' or (use_gevent == 'auto' and GEVENT_AVAILABLE):
         if GEVENT_AVAILABLE:
             _start_gevent_server(app, bind_host, port, ssl_context, domain, workers, http_redirect_port)
@@ -835,21 +876,28 @@ def main(debug_mode=False):
 
     # Fallback to Flask development server
     print("Starting PegaProx with Flask development server")
-    print("WARNING: Not recommended for production!")
-    print("Install gevent for better performance: pip install gevent")
+    if sys.platform == 'win32':
+        print("Mode: Windows compatibility (Flask dev server)")
+    else:
+        print("WARNING: Not recommended for production!")
+        print("Install gevent for better performance: pip install gevent")
 
     vnc_ws_port = port + 1
     ssh_ws_port = port + 2
 
+    # On Windows, IPv6 dual-stack causes SSL handshake issues with Flask's dev server too.
+    # Force IPv4 binding so the browser can always reach it via localhost/127.0.0.1.
+    flask_host = '0.0.0.0' if (sys.platform == 'win32' and ':' in bind_host) else bind_host
+
     # Start VNC/SSH WebSocket servers
-    _start_console_servers(bind_host, port, ssl_context)
+    _start_console_servers(flask_host, port, ssl_context)
 
     if ssl_context:
-        print(f"HTTPS on https://{bind_host}:{port}")
-        app.run(host=bind_host, port=port, debug=False, ssl_context=ssl_context, threaded=True)
+        print(f"HTTPS on https://localhost:{port}  (also https://127.0.0.1:{port})")
+        app.run(host=flask_host, port=port, debug=False, ssl_context=ssl_context, threaded=True)
     else:
-        print(f"HTTP on http://{bind_host}:{port}")
-        app.run(host=bind_host, port=port, debug=False, threaded=True)
+        print(f"HTTP on http://localhost:{port}  (also http://127.0.0.1:{port})")
+        app.run(host=flask_host, port=port, debug=False, threaded=True)
 
 
 def _start_console_servers(bind_host, port, ssl_context):

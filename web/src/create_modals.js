@@ -2623,32 +2623,19 @@
                                                     const result = await updatePreferences({ ui_layout: 'modern', theme: 'proxmoxDark' });
                                                     if (result.success) addToast(`${t('layoutStyle')}: ${t('layoutModern') || 'Modern'}`, 'success');
                                                 }}
-                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${
-                                                    (user?.ui_layout || 'modern') === 'modern'
-                                                        ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30'
-                                                        : 'border-proxmox-border hover:border-gray-500'
-                                                }`}
+                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${(user?.ui_layout || 'modern') === 'modern' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'}`}
                                             >
                                                 <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
-                                                    {/* Modern preview: gradient sidebar, rounded cards */}
                                                     <div className="absolute left-0 top-0 bottom-0 w-5 bg-gradient-to-b from-proxmox-orange/30 to-purple-500/20" />
                                                     <div className="absolute right-1.5 top-1.5 left-7 h-2 rounded-full bg-proxmox-orange/40" />
                                                     <div className="absolute right-1.5 top-5 left-7 bottom-1.5 rounded-lg bg-proxmox-card border border-proxmox-border">
-                                                        <div className="flex gap-1 p-1">
-                                                            <div className="w-2 h-1.5 rounded-full bg-proxmox-orange/50" />
-                                                            <div className="w-2 h-1.5 rounded-full bg-gray-600" />
-                                                            <div className="w-2 h-1.5 rounded-full bg-gray-600" />
-                                                        </div>
+                                                        <div className="flex gap-1 p-1"><div className="w-2 h-1.5 rounded-full bg-proxmox-orange/50" /><div className="w-2 h-1.5 rounded-full bg-gray-600" /></div>
                                                     </div>
-                                                    {(user?.ui_layout || 'modern') === 'modern' && (
-                                                        <div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5">
-                                                            <Icons.Check className="w-3 h-3 text-white" />
-                                                        </div>
-                                                    )}
+                                                    {(user?.ui_layout || 'modern') === 'modern' && (<div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5"><Icons.Check className="w-3 h-3 text-white" /></div>)}
                                                 </div>
                                                 <div className="text-center">
-                                                    <span className="text-xs font-medium">{t('layoutModern') || 'Modern'}</span>
-                                                    <p className="text-[10px] text-gray-500 mt-0.5">{t('layoutModernDesc') || 'Cards, animations, gradients'}</p>
+                                                    <span className="text-xs font-medium">{t('layoutModern') || 'Contemporain'}</span>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">Cards, animations</p>
                                                 </div>
                                             </button>
                                             {/* Corporate layout card */}
@@ -2658,36 +2645,81 @@
                                                     const result = await updatePreferences({ ui_layout: 'corporate', theme: corpTheme });
                                                     if (result.success) addToast(`${t('layoutStyle')}: ${t('layoutCorporate') || 'Corporate'}`, 'success');
                                                 }}
-                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${
-                                                    user?.ui_layout === 'corporate'
-                                                        ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30'
-                                                        : 'border-proxmox-border hover:border-gray-500'
-                                                }`}
+                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${user?.ui_layout === 'corporate' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'}`}
                                             >
                                                 <div className="h-16 rounded mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
-                                                    {/* Corporate preview: flat sidebar, tree lines, underline tabs */}
                                                     <div className="absolute left-0 top-0 bottom-0 w-5 bg-proxmox-card border-r border-proxmox-border">
-                                                        <div className="mt-2 ml-1 space-y-1">
-                                                            <div className="w-3 h-0.5 bg-gray-500" />
-                                                            <div className="w-2.5 h-0.5 bg-gray-600 ml-1" />
-                                                            <div className="w-2.5 h-0.5 bg-gray-600 ml-1" />
-                                                        </div>
+                                                        <div className="mt-2 ml-1 space-y-1"><div className="w-3 h-0.5 bg-gray-500" /><div className="w-2.5 h-0.5 bg-gray-600 ml-1" /><div className="w-2.5 h-0.5 bg-gray-600 ml-1" /></div>
                                                     </div>
                                                     <div className="absolute right-1.5 top-1.5 left-7 h-2 bg-proxmox-card border-b border-proxmox-border flex items-end gap-1 px-1">
-                                                        <div className="w-3 h-0.5 bg-proxmox-orange" />
-                                                        <div className="w-3 h-0.5 bg-gray-600" />
-                                                        <div className="w-3 h-0.5 bg-gray-600" />
+                                                        <div className="w-3 h-0.5 bg-proxmox-orange" /><div className="w-3 h-0.5 bg-gray-600" />
                                                     </div>
                                                     <div className="absolute right-1.5 top-5 left-7 bottom-1.5 bg-proxmox-card border border-proxmox-border" />
-                                                    {user?.ui_layout === 'corporate' && (
-                                                        <div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5">
-                                                            <Icons.Check className="w-3 h-3 text-white" />
-                                                        </div>
-                                                    )}
+                                                    {user?.ui_layout === 'corporate' && (<div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5"><Icons.Check className="w-3 h-3 text-white" /></div>)}
                                                 </div>
                                                 <div className="text-center">
                                                     <span className="text-xs font-medium">{t('layoutCorporate') || 'Corporate'}</span>
-                                                    <p className="text-[10px] text-gray-500 mt-0.5">{t('layoutCorporateDesc') || 'Enterprise style, dense'}</p>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">Enterprise, compact</p>
+                                                </div>
+                                            </button>
+                                            {/* Focus layout card */}
+                                            <button
+                                                onClick={async () => {
+                                                    const result = await updatePreferences({ ui_layout: 'focus' });
+                                                    if (result.success) addToast('Layout: Focus', 'success');
+                                                }}
+                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${user?.ui_layout === 'focus' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'}`}
+                                            >
+                                                <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                                    <div className="absolute left-0 top-0 bottom-0 w-3 bg-proxmox-card border-r border-proxmox-border flex flex-col items-center pt-1.5 gap-1">
+                                                        <div className="w-1.5 h-1.5 rounded-sm bg-proxmox-orange/70" />
+                                                        <div className="w-1.5 h-1.5 rounded-sm bg-gray-600" />
+                                                        <div className="w-1.5 h-1.5 rounded-sm bg-gray-600" />
+                                                    </div>
+                                                    <div className="absolute left-3 right-0 top-0 h-3 border-b border-proxmox-border flex items-center gap-1.5 px-1.5">
+                                                        <div className="w-4 h-1 rounded-full bg-green-500/50" />
+                                                        <div className="w-4 h-1 rounded-full bg-blue-500/50" />
+                                                        <div className="w-4 h-1 rounded-full bg-orange-500/50" />
+                                                    </div>
+                                                    <div className="absolute left-5 right-1.5 top-4 bottom-1.5 grid grid-cols-2 gap-1">
+                                                        <div className="bg-proxmox-card border border-proxmox-border rounded" />
+                                                        <div className="bg-proxmox-card border border-proxmox-border rounded" />
+                                                    </div>
+                                                    {user?.ui_layout === 'focus' && (<div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5"><Icons.Check className="w-3 h-3 text-white" /></div>)}
+                                                </div>
+                                                <div className="text-center">
+                                                    <span className="text-xs font-medium">Focus</span>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">Sidebar slim + métriques</p>
+                                                </div>
+                                            </button>
+                                            {/* Analytics layout card */}
+                                            <button
+                                                onClick={async () => {
+                                                    const result = await updatePreferences({ ui_layout: 'analytics' });
+                                                    if (result.success) addToast('Layout: Analytics', 'success');
+                                                }}
+                                                className={`p-3 rounded-xl border-2 transition-all hover:scale-105 text-left ${user?.ui_layout === 'analytics' ? 'border-proxmox-orange ring-2 ring-proxmox-orange/30' : 'border-proxmox-border hover:border-gray-500'}`}
+                                            >
+                                                <div className="h-16 rounded-lg mb-2 relative overflow-hidden bg-proxmox-dark border border-proxmox-border">
+                                                    <div className="absolute left-0 right-0 top-0 h-3.5 border-b border-proxmox-border flex items-center gap-1 px-1.5">
+                                                        <div className="w-3 h-1.5 rounded bg-proxmox-orange/60" />
+                                                        <div className="w-3 h-1.5 rounded bg-gray-600" />
+                                                        <div className="w-3 h-1.5 rounded bg-gray-600" />
+                                                    </div>
+                                                    <div className="absolute left-1.5 right-1.5 top-5 h-4 grid grid-cols-4 gap-0.5">
+                                                        <div className="bg-green-500/20 border border-green-500/30 rounded-sm" />
+                                                        <div className="bg-blue-500/20 border border-blue-500/30 rounded-sm" />
+                                                        <div className="bg-orange-500/20 border border-orange-500/30 rounded-sm" />
+                                                        <div className="bg-purple-500/20 border border-purple-500/30 rounded-sm" />
+                                                    </div>
+                                                    <div className="absolute left-1.5 right-1.5 top-10 bottom-1.5 bg-proxmox-card border border-proxmox-border rounded-sm flex items-end gap-0.5 px-1 pb-0.5">
+                                                        {[40,65,45,80,55,70,90].map((h,i) => <div key={i} className="flex-1 rounded-sm bg-proxmox-orange/40" style={{height:`${h}%`}} />)}
+                                                    </div>
+                                                    {user?.ui_layout === 'analytics' && (<div className="absolute top-1 right-1 bg-proxmox-orange rounded-full p-0.5"><Icons.Check className="w-3 h-3 text-white" /></div>)}
+                                                </div>
+                                                <div className="text-center">
+                                                    <span className="text-xs font-medium">Analytics</span>
+                                                    <p className="text-[10px] text-gray-500 mt-0.5">KPIs + graphiques</p>
                                                 </div>
                                             </button>
                                         </div>

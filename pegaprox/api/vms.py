@@ -5942,11 +5942,9 @@ def start_vnc_websocket_server(port=5001, ssl_cert=None, ssl_key=None, host='0.0
     ws_thread = threading.Thread(target=run_server, daemon=True)
     ws_thread.start()
 
-    # Wait for server to be ready (max 5 seconds)
-    if server_ready.wait(timeout=5):
-        print(f"VNC WebSocket Server started successfully", flush=True)
-    else:
-        print(f"WARNING: VNC WebSocket Server may not be ready yet (check logs above for errors)", flush=True)
+    # Don't block waiting for VNC server - it starts in background (daemon thread)
+    # server_ready.wait() was causing gevent deadlock on Windows
+    print(f"VNC WebSocket Server starting in background...", flush=True)
 
 
 # Keep flask-sock version as backup (renamed)
@@ -6166,6 +6164,7 @@ def start_ssh_websocket_server(port=5002, ssl_cert=None, ssl_key=None, host='0.0
     
     # Create a standalone script that runs the SSH WebSocket server
     server_script = '''#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Standalone SSH WebSocket Server - runs without gevent"""
 import asyncio
 import ssl
@@ -6530,19 +6529,20 @@ if __name__ == '__main__':
             except:
                 pass  # Neither fuser nor lsof available, hope for the best
         
-        with open(script_path, 'w') as f:
+        with open(script_path, 'w', encoding='utf-8') as f:
             f.write(server_script)
         
         # Set environment variables for the subprocess
-        env = os.environ.copy()
+        # All values must be plain strings (pathlib.Path objects would cause ValueError on Windows)
+        env = {k: str(v) for k, v in os.environ.items()}
         env['SSH_WS_PORT'] = str(port)
-        env['SSH_WS_HOST'] = host  # Issue #71: IPv6 support
+        env['SSH_WS_HOST'] = str(host)  # Issue #71: IPv6 support
         main_port = port - 2
         env['PEGAPROX_URL'] = f"https://127.0.0.1:{main_port}" if ssl_cert else f"http://127.0.0.1:{main_port}"
         if ssl_cert:
-            env['SSH_WS_SSL_CERT'] = ssl_cert
+            env['SSH_WS_SSL_CERT'] = str(ssl_cert)
         if ssl_key:
-            env['SSH_WS_SSL_KEY'] = ssl_key
+            env['SSH_WS_SSL_KEY'] = str(ssl_key)
         
         # Start as subprocess (completely separate process, no gevent)
         # Use same working directory as main server

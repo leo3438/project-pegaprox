@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """Standalone SSH WebSocket Server - runs without gevent"""
 import asyncio
 import ssl

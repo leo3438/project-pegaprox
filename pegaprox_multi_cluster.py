@@ -48,7 +48,10 @@ DONE: Archive-based update mechanism - NS feb 2026
 import os
 import sys
 
-USE_GEVENT = os.environ.get('PEGAPROX_NO_GEVENT', '').lower() not in ('1', 'true', 'yes')
+# On Windows, gevent monkey-patching breaks subprocess, SSL handshakes, and threading.
+# Disable it automatically — Flask dev server is used instead (see app.py).
+_no_gevent_env = os.environ.get('PEGAPROX_NO_GEVENT', '').lower() in ('1', 'true', 'yes')
+USE_GEVENT = not _no_gevent_env and sys.platform != 'win32'
 
 if USE_GEVENT:
     try:
@@ -57,6 +60,8 @@ if USE_GEVENT:
         print("Gevent monkey-patching applied")
     except ImportError:
         pass
+elif sys.platform == 'win32':
+    print("Windows: gevent disabled (compatibility mode)")
 
 import warnings
 warnings.filterwarnings('ignore', message='coroutine.*was never awaited')

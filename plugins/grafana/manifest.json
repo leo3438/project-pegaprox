@@ -1,0 +1,9 @@
+{
+    "id": "grafana",
+    "name": "Grafana",
+    "version": "1.0.0",
+    "author": "PegaProx Team",
+    "description": "Embed Grafana dashboards directly in PegaProx. Browse your dashboards, pin your favorites, and view panels without leaving the interface.",
+    "min_pegaprox": "0.7.0",
+    "category": "monitoring"
+}

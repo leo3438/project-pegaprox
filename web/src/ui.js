@@ -190,17 +190,17 @@
         // NS: ChatGPT wrote the initial SVG math, I just cleaned it up
         function Sparkline({ data = [], color = '#3b82f6', height = 24, width = 80 }) {
             if (!data || data.length === 0) return null;
-            
+
             const max = Math.max(...data, 1);
             const min = Math.min(...data, 0);
             const range = max - min || 1;
-            
+
             const points = data.map((value, index) => {
                 const x = (index / (data.length - 1)) * width;
                 const y = height - ((value - min) / range) * height;
                 return `${x},${y}`;
             }).join(' ');
-            
+
             return(
                 <svg width={width} height={height} className="inline-block">
                     <polyline
@@ -209,6 +209,35 @@
                         strokeWidth="1.5"
                         points={points}
                     />
+                </svg>
+            );
+        }
+
+        // AreaSparkline - filled area chart with gradient, used in NodeCard metric panels
+        function AreaSparkline({ data = [], color = '#e85d04', height = 40 }) {
+            if (!data || data.length < 2) return <div style={{height, background:'rgba(255,255,255,0.03)', borderRadius:4}} />;
+            const W = 200, H = height;
+            const max = Math.max(...data, 1);
+            const pts = data.map((v, i) => [
+                (i / (data.length - 1)) * W,
+                H - 2 - ((v / max) * (H - 4))
+            ]);
+            const line = pts.map(([x,y], i) => `${i===0?'M':'L'}${x.toFixed(1)},${y.toFixed(1)}`).join(' ');
+            const area = `${line} L${W},${H} L0,${H} Z`;
+            const gradId = `ag${color.replace(/[^a-z0-9]/gi,'')}`;
+            const lastX = pts[pts.length-1][0].toFixed(1);
+            const lastY = pts[pts.length-1][1].toFixed(1);
+            return (
+                <svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{display:'block'}}>
+                    <defs>
+                        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+                            <stop offset="0%" stopColor={color} stopOpacity="0.4" />
+                            <stop offset="100%" stopColor={color} stopOpacity="0.03" />
+                        </linearGradient>
+                    </defs>
+                    <path d={area} fill={`url(#${gradId})`} />
+                    <path d={line} fill="none" stroke={color} strokeWidth="1.5" strokeLinejoin="round" />
+                    <circle cx={lastX} cy={lastY} r="2.5" fill={color} />
                 </svg>
             );
         }

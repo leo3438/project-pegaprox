@@ -193,7 +193,7 @@ def update_user_preferences():
     # NS: UI Layout - Jan 2026
     if 'ui_layout' in data:
         layout = data['ui_layout']
-        if layout in ['modern', 'classic', 'corporate']:
+        if layout in ['modern', 'classic', 'corporate', 'focus', 'analytics']:
             user['ui_layout'] = layout
             logging.info(f"update_user_preferences: Setting ui_layout to '{layout}' for user '{username}'")
         else:

@@ -369,11 +369,13 @@
         }
 
         // LW: Feb 2026 - layout hook (reads from user preferences)
-        // returns layout type and convenience boolean for corporate mode
+        // returns layout type and convenience booleans
         function useLayout() {
             const { user } = useAuth();
             const layout = user?.ui_layout || 'modern';
             const isCorporate = layout === 'corporate';
+            const isFocus    = layout === 'focus';
+            const isAnalytics = layout === 'analytics';
 
             // Set data-layout on body whenever layout changes
             // also force matching theme so modern themes dont bleed into corporate
@@ -385,5 +387,5 @@
                 }
             }, [layout]);
 
-            return { layout, isCorporate };
+            return { layout, isCorporate, isFocus, isAnalytics };
         }
