@@ -10,6 +10,11 @@ cert.pem
 key.pem
 *.p12
 *.pfx
+ssl/
+ssl_backup/
+
+# Plugin configs (contain API keys / secrets)
+plugins/*/config.json
 
 # Runtime data
 config/
